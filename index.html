@@ -72,7 +72,7 @@
 <canvas id="sea"></canvas>
 <div id="hud">
   <h1>푸른 순환</h1>
-  <div class="ver">생태계 수족관 · v0.3 · <span id="cFps">--</span>fps</div>
+  <div class="ver">생태계 수족관 · v0.4 · <span id="cFps">--</span>fps</div>
   <div class="stat"><span><span class="dot" style="background:#69d67c"></span>조류</span><b id="cAlgae">0</b></div>
   <div class="stat"><span><span class="dot" style="background:#8fd3e8"></span>초식어</span><b id="cHerb">0</b></div>
   <div class="stat"><span><span class="dot" style="background:#f0918a"></span>포식자</span><b id="cPred">0</b></div>
@@ -86,6 +86,8 @@
 </div>
 <div id="dash">
   <div id="dashHead"><span>생태계 지표</span><button id="btnDashClose">닫기</button></div>
+  <div class="sec"><div class="secT">환경 상태</div><div class="gstat" id="envStats"></div></div>
+  <div class="sec"><div class="secT">환경 추이 · 최근 5분</div><canvas id="chEnv" class="chart" height="110"></canvas><div class="leg" id="envLeg"></div></div>
   <div class="sec"><div class="secT">개체수 추이 · 최근 5분</div><canvas id="chLine" class="chart" height="132"></canvas><div class="leg" id="lineLeg"></div></div>
   <div class="sec"><div class="secT">생물량 비중</div><canvas id="chPie" class="chart" height="150"></canvas><div class="leg" id="pieLeg"></div></div>
   <div class="sec"><div class="secT">세대 · 기록</div><div class="gstat" id="genStats"></div></div>
@@ -96,7 +98,7 @@
 <script>
 'use strict';
 /* ============================================================
-   푸른 순환 v0.1 — 생태계 수족관 (수직 슬라이스)
+   푸른 순환 v0.4 — 생태계 수족관 (낮밤·수온·산소 환경 변수 + 이벤트)
    생산자(조류/수초) → 초식어 → 포식자, 개체 단위 시뮬레이션
    ============================================================ */
 const canvas = document.getElementById('sea');
@@ -146,15 +148,33 @@ const _near = [];
 const env = {
   nutrients: 0.6,      // 0~1, 조류 성장 속도에 비례
   oxygen: 0.8,
+  temp: 22,            // 수온 °C
+  light: 1,            // 일광 강도 0~1 (낮밤 주기)
+  bloom: 0,            // 조류 대발생 남은 초
+  bloomCd: 0,          // 대발생 쿨다운
+  predRescue: -1,      // 포식자 유입 카운트다운 (-1 = 대기 아님)
   t: 0,                // 시뮬레이션 누적 초
   day: 0,              // 경과 '일' (45초 = 1일)
 };
 const DAY_LEN = 45;
+/* 낮밤 주기: 하루 45초, 한낮(p=0.5)에 최대, 자정(p=0/1)에 최소 */
+function daylight(tt) {
+  const p = (tt % DAY_LEN) / DAY_LEN;
+  return clamp(0.10 + 0.90 * Math.max(0, Math.sin(p * Math.PI)) ** 1.2, 0, 1);
+}
+function phaseLabel() {
+  const p = (env.t % DAY_LEN) / DAY_LEN;
+  if (p < 0.16) return '새벽';
+  if (p < 0.38) return '아침';
+  if (p < 0.62) return '낮';
+  if (p < 0.84) return '황혼';
+  return '밤';
+}
 
 /* ---------- 통계 · 이력 (v0.3 대시보드) ---------- */
 const stats = { births: 0, deaths: 0, hunts: 0, mutations: 0, maxGenHerb: 1, maxGenPred: 1 };
 const HIST_MAX = 600; // 0.5초 × 600 = 5분
-const hist = { a: [], h: [], p: [] };
+const hist = { a: [], h: [], p: [], o: [], tp: [] };
 let histAcc = 0;
 
 /* ---------- 조류 (부유 먹이 알갱이) ---------- */
@@ -167,7 +187,7 @@ function spawnAlgae(x, y, big) {
     y: y !== undefined ? y : rand(H * 0.15, H * 0.9),
     vx: rand(-4, 4), vy: rand(-2, 2),
     r: big ? rand(3.2, 4.6) : rand(1.6, 3.0),
-    e: big ? 26 : rand(8, 16),
+    e: big ? 26 : rand(10, 18),
     ph: rand(0, TAU),
   });
 }
@@ -212,8 +232,9 @@ function baseFish(x, y, genes) {
 }
 function mutate(g, amt) {
   const m = { size: g.size, speed: g.speed, hue: g.hue };
-  m.size = clamp(m.size + rand(-amt, amt) * 0.14, 0.7, 1.7);
-  m.speed = clamp(m.speed + rand(-amt, amt) * 0.16, 0.65, 1.8);
+  /* 약한 평균 회귀 — 대사 비용 폭주(고속화)를 막아 장기 안정성 확보 */
+  m.size = clamp(m.size * 0.96 + 1.0 * 0.04 + rand(-amt, amt) * 0.14, 0.75, 1.45);
+  m.speed = clamp(m.speed * 0.95 + 1.0 * 0.05 + rand(-amt, amt) * 0.16, 0.75, 1.35);
   m.hue = (m.hue + rand(-amt, amt) * 26 + 360) % 360;
   return m;
 }
@@ -231,7 +252,7 @@ function spawnHerb(x, y, genes, gen) {
 }
 
 /* ---------- 포식자 ---------- */
-const PRED_MAX = 16;
+const PRED_MAX = 6;
 const preds = [];
 function spawnPred(x, y, genes, gen) {
   if (preds.length >= PRED_MAX) return null;
@@ -296,18 +317,49 @@ function step(dt) {
   env.t += dt;
   env.day = Math.floor(env.t / DAY_LEN);
 
-  /* --- 수초: 영양염 소모해 성장, 포자(조류) 방출 --- */
+  /* --- 환경: 낮밤 · 수온 · 용존 산소 (v0.4) --- */
+  env.light = daylight(env.t);
+  const seasonDrift = Math.sin(env.t / 240) * 1.5;                 // 아주 느린 계절 변동
+  const tempTarget = 17.5 + env.light * 8 + (env.bloom > 0 ? 2 : 0) + seasonDrift;
+  env.temp += (tempTarget - env.temp) * clamp(dt * 0.03, 0, 1);
+  /* 산소: 낮에 조류·수초 광합성으로 생산, 물고기 호흡으로 소비, 대기 평형으로 확산 */
+  const oProd = env.light * (algae.length / ALGAE_MAX) * 0.05 + env.light * plants.length * 0.0016;
+  const oCons = (herbs.length * 0.0004 + preds.length * 0.0018) * (1 + (env.temp - 22) * 0.03);
+  env.oxygen = clamp(env.oxygen + dt * (oProd - oCons + (0.62 - env.oxygen) * 0.03), 0, 1);
+  if (env.oxygen < 0.24 && !env.oxyWarned) { env.oxyWarned = true; addLog('용존 산소가 낮아지고 있다'); }
+  if (env.oxygen > 0.38) env.oxyWarned = false;
+
+  /* --- 수초: 영양염 소모해 성장, 낮에만 포자(조류) 방출 --- */
   for (const p of plants) {
-    p.grow = clamp(p.grow + dt * 0.02 * env.nutrients, 0.3, 1);
+    p.grow = clamp(p.grow + dt * 0.02 * env.nutrients * (0.3 + env.light * 0.7), 0.3, 1);
     p.spore -= dt;
     if (p.spore <= 0) {
-      p.spore = rand(2.5, 6) / (0.4 + env.nutrients);
-      spawnAlgae(p.x + rand(-14, 14), H - p.h * p.grow - rand(0, 30));
+      p.spore = rand(2.5, 6) / (0.25 + env.nutrients * (0.15 + env.light * 0.85));
+      if (env.light > 0.2 || Math.random() < 0.2) spawnAlgae(p.x + rand(-14, 14), H - p.h * p.grow - rand(0, 30));
     }
   }
-  /* 영양염은 서서히 소모, 산소는 조류/수초가 회복 */
-  env.nutrients = clamp(env.nutrients - dt * 0.004 + detritus.length * 0.0, 0, 1);
-  env.oxygen = clamp(0.35 + (algae.length / ALGAE_MAX) * 0.5 + plants.length * 0.01, 0, 1);
+  /* 영양염은 서서히 소모 */
+  env.nutrients = clamp(env.nutrients - dt * 0.004, 0, 1);
+  /* 부유 조류 자연 발생 — 낮 광합성에 비례, 밤에는 잔량만 */
+  if (algae.length < ALGAE_MAX && Math.random() < dt * (0.3 + env.light * 3.2) * (0.35 + env.nutrients)) spawnAlgae();
+
+  /* --- 조류 대발생 이벤트 (영양염 풍부 + 한낮) --- */
+  if (env.bloomCd > 0) env.bloomCd -= dt;
+  if (env.bloom > 0) {
+    env.bloom -= dt;
+    for (let k = 0; k < 2; k++) if (algae.length < ALGAE_MAX && Math.random() < dt * 9) spawnAlgae(rand(10, W - 10), rand(10, H * 0.7));
+    if (env.bloom <= 0) {
+      env.bloomCd = 75;
+      /* 대발생 종료: 일부 조류가 죽어 영양염으로 — 산소 급감 유발 */
+      const die = Math.floor(algae.length * 0.35);
+      for (let k = 0; k < die; k++) { const a = algae.splice((Math.random() * algae.length) | 0, 1)[0]; if (a) dropDetritus(a.x, a.y, 0.8); }
+      env.oxygen = clamp(env.oxygen - 0.12, 0, 1);
+      addLog('조류 대발생이 가라앉았다');
+    }
+  } else if (env.bloomCd <= 0 && env.nutrients > 0.5 && env.light > 0.7 && algae.length > 60 && Math.random() < dt * 0.012) {
+    env.bloom = 13;
+    addLog('조류가 대발생하기 시작했다');
+  }
 
   /* --- 조류 이동 --- */
   algaeGrid.clear();
@@ -341,7 +393,7 @@ function step(dt) {
     f.age += dt;
     const g = f.genes;
     const spd = 42 * g.speed;
-    const hungry = f.energy < 62;
+    const hungry = f.energy < 68;
 
     // 포식자 회피
     let fleeX = 0, fleeY = 0, danger = false;
@@ -392,12 +444,12 @@ function step(dt) {
     if (f.y < 14) f.y = 14, f.vy = Math.abs(f.vy);
     if (f.y > H - 22) f.y = H - 22, f.vy = -Math.abs(f.vy);
 
-    f.energy -= dt * (2.1 + g.speed * 0.9) / (0.55 + env.oxygen * 0.6);
+    f.energy -= dt * (1.85 + g.speed * 0.75) * (1 + (env.temp - 22) * 0.04) / (0.65 + env.oxygen * 0.55);
     f.dir = f.vx >= 0 ? 1 : -1;
 
     // 번식
-    if (f.energy > 82 && f.age > 12 && herbs.length < HERB_MAX - 2) {
-      f.energy *= 0.52;
+    if (f.energy > 76 && f.age > 12 && herbs.length < 42) {
+      f.energy *= 0.55;
       const ng = mutate(g, 1);
       const child = spawnHerb(f.x + rand(-8, 8), f.y + rand(-8, 8), ng, f.gen + 1);
       if (child) {
@@ -424,7 +476,8 @@ function step(dt) {
     const spd = 52 * g.speed;
     let ax, ay;
     let best = null, bd = 1e9;
-    if (f.energy < 88) {
+    const huntDrive = herbs.length < 8 ? 45 : 88; // 먹이가 귀하면 사냥을 자제 — 회복 기회
+    if (f.energy < huntDrive) {
       herbGrid.near(f.x, f.y, 240, _near);
       for (const h of _near) {
         const dx = h.x - f.x, dy = h.y - f.y, d2 = dx * dx + dy * dy;
@@ -435,7 +488,7 @@ function step(dt) {
       const d = Math.sqrt(bd) || 1;
       ax = (best.x - f.x) / d * spd * 1.5; ay = (best.y - f.y) / d * spd * 1.5;
       if (d < 13 * g.size + 6 * best.genes.size) {
-        f.energy = clamp(f.energy + 34, 0, 110);
+        f.energy = clamp(f.energy + 32, 0, 110);
         const hi = herbs.indexOf(best);
         if (hi >= 0) { herbs.splice(hi, 1); dropDetritus(f.x, f.y, 1.2); stats.hunts++; stats.deaths++; }
         if (!firstHuntLogged) { firstHuntLogged = true; addLog('포식자가 사냥에 성공했다'); }
@@ -452,10 +505,10 @@ function step(dt) {
     if (f.x > W - 16) f.x = W - 16, f.vx = -Math.abs(f.vx);
     if (f.y < 16) f.y = 16, f.vy = Math.abs(f.vy);
     if (f.y > H - 30) f.y = H - 30, f.vy = -Math.abs(f.vy);
-    f.energy -= dt * (2.6 + g.speed) / (0.55 + env.oxygen * 0.6);
+    f.energy -= dt * (1.8 + g.speed * 0.6) * (1 + (env.temp - 22) * 0.04) / (0.65 + env.oxygen * 0.55);
     f.dir = f.vx >= 0 ? 1 : -1;
 
-    if (f.energy > 96 && f.age > 30 && preds.length < PRED_MAX) {
+    if (f.energy > 98 && f.age > 30 && preds.length < PRED_MAX) {
       f.energy *= 0.55;
       const ng = mutate(g, 1);
       const child = spawnPred(f.x + rand(-10, 10), f.y + rand(-10, 10), ng, f.gen + 1);
@@ -486,14 +539,33 @@ function step(dt) {
   if (histAcc >= 0.5) {
     histAcc = 0;
     hist.a.push(algae.length); hist.h.push(herbs.length); hist.p.push(preds.length);
-    if (hist.a.length > HIST_MAX) { hist.a.shift(); hist.h.shift(); hist.p.shift(); }
+    hist.o.push(Math.round(env.oxygen * 100)); hist.tp.push(Math.round(env.temp * 10) / 10);
+    if (hist.a.length > HIST_MAX) { hist.a.shift(); hist.h.shift(); hist.p.shift(); hist.o.shift(); hist.tp.shift(); }
   }
 
-  /* --- 개체군 보정: 초식어 멸종 방지 (조류가 풍부하면 자연 유입) --- */
-  if (herbs.length === 0 && algae.length > 60) {
-    spawnHerb(); spawnHerb();
-    addLog('어디선가 초식어 한 쌍이 흘러들었다');
-  }
+  /* --- 멸종과 회복 이벤트 (v0.4) --- */
+  if (herbs.length === 0) {
+    if (!env.herbGone) { env.herbGone = true; env.herbRescue = 18; addLog('초식어가 모두 사라졌다'); }
+    /* 포식 압력이 낮아질 때까지 기다렸다가 유입 — 유입 개체가 곧바로 먹히는 악순환 방지 */
+    if (env.herbRescue > 0 && algae.length > 60) {
+      if (preds.length <= 4) {
+        env.herbRescue -= dt;
+        if (env.herbRescue <= 0) {
+          spawnHerb(); spawnHerb(); spawnHerb();
+          env.herbGone = false;
+          addLog('어디선가 초식어 무리가 흘러들었다');
+        }
+      }
+    }
+  } else env.herbGone = false;
+  if (preds.length === 0) {
+    if (!env.predGone) { env.predGone = true; addLog('포식자가 모두 사라졌다'); }
+    if (env.predRescue < 0 && herbs.length > 12) env.predRescue = 20;
+    if (env.predRescue >= 0) {
+      env.predRescue -= dt;
+      if (env.predRescue < 0) { spawnPred(); env.predGone = false; addLog('어디선가 포식자가 흘러들었다'); }
+    }
+  } else { env.predGone = false; env.predRescue = -1; }
 }
 
 /* ============================================================
@@ -521,7 +593,7 @@ function drawBackground(t) {
   for (let i = 0; i < 5; i++) {
     const drift = Math.sin(t * 0.07 + i * 1.7) * 60 + Math.sin(t * 0.023 + i * 3.1) * 30;
     const bx = W * (0.08 + i * 0.21) + drift;
-    const flick = 0.6 + 0.4 * Math.sin(t * 0.5 + i * 2.2);
+    const flick = (0.6 + 0.4 * Math.sin(t * 0.5 + i * 2.2)) * (0.12 + env.light * 0.88);
     const g2 = ctx.createLinearGradient(bx, 0, bx + 100, H * 0.9);
     g2.addColorStop(0, `rgba(150,215,255,${0.10 * flick})`);
     g2.addColorStop(0.6, `rgba(140,205,250,${0.035 * flick})`);
@@ -783,7 +855,7 @@ function updateHud(dt) {
   elA.textContent = algae.length;
   elH.textContent = herbs.length;
   elP.textContent = preds.length;
-  elT.textContent = env.day + '일';
+  elT.textContent = (env.light > 0.4 ? '☀️ ' : '🌙 ') + phaseLabel() + ' · ' + env.day + '일';
   elF.textContent = Math.round(fpsEma);
   window.__fps = Math.round(fpsEma);
 }
@@ -911,7 +983,57 @@ function renderDashLog() {
     `<div><span class="d">${l.d}일</span>${l.msg}</div>`).join('');
 }
 
+const ENV_SERIES = [
+  { key: 'o', name: '산소 %', color: '#7fd4ff' },
+  { key: 'tp', name: '수온 °C', color: '#ffb27d' },
+];
+function drawEnvStats() {
+  const items = [
+    ['시간대', phaseLabel()],
+    ['수온', env.temp.toFixed(1) + '°C'],
+    ['용존 산소', Math.round(env.oxygen * 100) + '%'],
+    ['영양염', Math.round(env.nutrients * 100) + '%'],
+    ['일광', Math.round(env.light * 100) + '%'],
+    ['대발생', env.bloom > 0 ? '진행 중' : (env.bloomCd > 0 ? '휴식' : '—')],
+  ];
+  document.getElementById('envStats').innerHTML = items.map(([k, v]) =>
+    `<div class="row"><span>${k}</span><b>${v}</b></div>`).join('');
+}
+function drawEnvChart() {
+  const cv = document.getElementById('chEnv');
+  const [c, w, h] = fitCanvas(cv, 110);
+  const padL = 30, padB = 16, padT = 8, padR = 8;
+  const maxV = 100;
+  c.strokeStyle = 'rgba(120,190,230,0.12)'; c.lineWidth = 1;
+  c.fillStyle = 'rgba(140,190,215,0.6)'; c.font = '10px sans-serif'; c.textAlign = 'right';
+  for (let i = 0; i <= 4; i++) {
+    const y = padT + (h - padT - padB) * i / 4;
+    c.beginPath(); c.moveTo(padL, y); c.lineTo(w - padR, y); c.stroke();
+    c.fillText(Math.round(maxV * (4 - i) / 4), padL - 5, y + 3);
+  }
+  const x0 = padL, x1 = w - padR;
+  for (const s of ENV_SERIES) {
+    const arr = hist[s.key];
+    if (arr.length < 2) continue;
+    c.strokeStyle = s.color; c.lineWidth = 1.8; c.lineJoin = 'round';
+    c.beginPath();
+    for (let i = 0; i < arr.length; i++) {
+      const px = x0 + (x1 - x0) * (i / (HIST_MAX - 1));
+      const y = padT + (h - padT - padB) * (1 - clamp(arr[i], 0, maxV) / maxV);
+      if (i === 0) c.moveTo(px, y); else c.lineTo(px, y);
+    }
+    c.stroke();
+    const lx = x0 + (x1 - x0) * ((arr.length - 1) / (HIST_MAX - 1));
+    const ly = padT + (h - padT - padB) * (1 - clamp(arr[arr.length - 1], 0, maxV) / maxV);
+    c.fillStyle = s.color;
+    c.beginPath(); c.arc(lx, ly, 3, 0, TAU); c.fill();
+  }
+  document.getElementById('envLeg').innerHTML = ENV_SERIES.map(s =>
+    `<span><span class="dot" style="background:${s.color}"></span>${s.name} ${hist[s.key].length ? hist[s.key][hist[s.key].length - 1] : 0}</span>`).join('');
+}
 function drawDash() {
+  drawEnvStats();
+  drawEnvChart();
   drawLineChart();
   drawPie();
   drawGenStats();
@@ -944,9 +1066,55 @@ function frame(now) {
   for (const f of herbs) drawFish(f, t, 'herb');
   for (const f of preds) drawFish(f, t, 'pred');
   drawBubbles();
+
+  /* --- 낮밤 · 이벤트 분위기 (v0.4) --- */
+  if (env.bloom > 0) {
+    ctx.fillStyle = `rgba(64,150,70,${0.10 * Math.min(1, env.bloom / 5)})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+  const nightA = (1 - env.light) * 0.52;
+  if (nightA > 0.02) {
+    ctx.fillStyle = `rgba(3,9,24,${nightA})`;
+    ctx.fillRect(0, 0, W, H);
+    /* 밤 반딧불 플랑크톤 */
+    if (env.light < 0.3) {
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < motes.length; i += 3) {
+        const m = motes[i];
+        const tw = Math.max(0, Math.sin(t * 1.7 + m.ph * 3));
+        ctx.fillStyle = `rgba(140,230,200,${tw * 0.35})`;
+        ctx.beginPath(); ctx.arc((m.x * W + Math.sin(t * 0.3 + m.ph) * 12), ((m.y * H + t * m.sp * 3) % H), m.r * 0.9, 0, TAU); ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
   updateHud(dt);
 }
 requestAnimationFrame(frame);
+
+/* ---------- ?sim=N : 개입 없는 장기 안정성 검증 훅 ---------- */
+const simQ = new URLSearchParams(location.search).get('sim');
+if (simQ) {
+  const total = Math.min(parseInt(simQ, 10) || 0, 3600);
+  const rec = { seconds: total, min: { a: 1e9, h: 1e9, p: 1e9 }, max: { a: 0, h: 0, p: 0 }, events: [], oxyMin: 1, tempMin: 99, tempMax: -99 };
+  let evAcc = 0;
+  for (let i = 0; i < total * 10; i++) {
+    step(0.1);
+    if (i % 10 === 0) {
+      rec.min.a = Math.min(rec.min.a, algae.length); rec.max.a = Math.max(rec.max.a, algae.length);
+      rec.min.h = Math.min(rec.min.h, herbs.length); rec.max.h = Math.max(rec.max.h, herbs.length);
+      rec.min.p = Math.min(rec.min.p, preds.length); rec.max.p = Math.max(rec.max.p, preds.length);
+      rec.oxyMin = Math.min(rec.oxyMin, env.oxygen);
+      rec.tempMin = Math.min(rec.tempMin, env.temp); rec.tempMax = Math.max(rec.tempMax, env.temp);
+    }
+  }
+  rec.final = { a: algae.length, h: herbs.length, p: preds.length, day: env.day, oxygen: Math.round(env.oxygen * 100) / 100, temp: Math.round(env.temp * 10) / 10 };
+  rec.events = logs.map(l => l.d + '일: ' + l.msg);
+  rec.stats = stats;
+  window.__simReport = rec;
+  document.title = '[sim] ' + JSON.stringify(rec.final);
+  const pre = document.createElement('pre'); pre.id = 'simout'; pre.textContent = JSON.stringify(rec); document.body.appendChild(pre);
+}
 </script>
 </body>
 </html>
