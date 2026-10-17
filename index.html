@@ -506,10 +506,11 @@ const herbs = [];
 function spawnHerb(x, y, genes, gen, line) {
   if (herbs.length >= HERB_MAX) return null;
   const g = genes || { size: rand(0.85, 1.15), speed: rand(0.9, 1.1), hue: rand(175, 205) };
-  recordMorph('herb', g);
+  const _mo = recordMorph('herb', g);
   const f = baseFish(x !== undefined ? x : rand(30, W - 30), y !== undefined ? y : rand(H * 0.25, H * 0.75), g);
   f.gen = gen || 1;
   f.rar = morphOf('herb', g).rarity;
+  f.newMorph = !!(_mo && _mo.seen === 1);
   nameFish(f, f.gen > 1, line);
   herbs.push(f);
   return f;
@@ -521,10 +522,11 @@ const preds = [];
 function spawnPred(x, y, genes, gen, line) {
   if (preds.length >= PRED_MAX) return null;
   const g = genes || { size: rand(1.0, 1.2), speed: rand(0.95, 1.1), hue: rand(345, 375) % 360 };
-  recordMorph('pred', g);
+  const _mo = recordMorph('pred', g);
   const f = baseFish(x !== undefined ? x : rand(40, W - 40), y !== undefined ? y : rand(H * 0.2, H * 0.6), g);
   f.gen = gen || 1;
   f.rar = morphOf('pred', g).rarity;
+  f.newMorph = !!(_mo && _mo.seen === 1);
   nameFish(f, f.gen > 1, line);
   f.energy = 80;
   preds.push(f);
@@ -538,10 +540,11 @@ const shrimps = [];
 function spawnShrimp(x, y, genes, gen, line) {
   if (shrimps.length >= SHRIMP_MAX) return null;
   const g = genes || { size: rand(0.5, 0.7), speed: rand(1.1, 1.3), hue: rand(15, 38) };
-  recordMorph('shrimp', g);
+  const _mo = recordMorph('shrimp', g);
   const f = baseFish(x !== undefined ? x : rand(20, W - 20), y !== undefined ? y : rand(H * 0.7, H - 30), g);
   f.gen = gen || 1;
   f.rar = morphOf('shrimp', g).rarity;
+  f.newMorph = !!(_mo && _mo.seen === 1);
   nameFish(f, f.gen > 1, line);
   shrimps.push(f);
   return f;
@@ -552,10 +555,11 @@ const jellies = [];
 function spawnJelly(x, y, genes, gen, line) {
   if (jellies.length >= JELLY_MAX) return null;
   const g = genes || { size: rand(0.9, 1.3), speed: rand(0.6, 0.8), hue: rand(265, 300) };
-  recordMorph('jelly', g);
+  const _mo = recordMorph('jelly', g);
   const f = baseFish(x !== undefined ? x : rand(30, W - 30), y !== undefined ? y : rand(H * 0.15, H * 0.6), g);
   f.gen = gen || 1;
   f.rar = morphOf('jelly', g).rarity;
+  f.newMorph = !!(_mo && _mo.seen === 1);
   nameFish(f, f.gen > 1, line);
   jellies.push(f);
   return f;
@@ -566,10 +570,11 @@ const apexes = [];
 function spawnApex(x, y, genes, gen, line) {
   if (apexes.length >= APEX_MAX) return null;
   const g = genes || { size: rand(2.0, 2.4), speed: rand(0.85, 1.0), hue: rand(205, 225) };
-  recordMorph('apex', g);
+  const _mo = recordMorph('apex', g);
   const f = baseFish(x !== undefined ? x : rand(40, W - 40), y !== undefined ? y : rand(H * 0.25, H * 0.6), g);
   f.gen = gen || 1;
   f.rar = morphOf('apex', g).rarity;
+  f.newMorph = !!(_mo && _mo.seen === 1);
   nameFish(f, f.gen > 1, line);
   f.energy = 80;
   apexes.push(f);
@@ -1341,7 +1346,7 @@ function step(dt) {
       const child = spawnHerb(f.x + rand(-8, 8), f.y + rand(-8, 8), ng, f.gen + 1, f.line);
       if (child) {
         stats.births++;
-        if (child.rar >= 2) addChron(f.line + ' — ' + (child.rar === 3 ? '전설의' : '희귀한') + ' 변이 ' + child.name + ' 탄생 (' + (f.gen + 1) + '대)');
+        if (child.rar >= 2 && child.newMorph) addChron(f.line + ' — ' + (child.rar === 3 ? '전설의' : '희귀한') + ' 변이 ' + child.name + ' 탄생 (' + (f.gen + 1) + '대)');
         if (f.gen + 1 > stats.maxGenHerb) { stats.maxGenHerb = f.gen + 1; if (stats.maxGenHerb >= 3) addLog('초식어 ' + stats.maxGenHerb + '세대 등장'); }
         if (Math.abs(ng.hue - g.hue) > 10) { stats.mutations++; if (stats.mutations <= 3 || stats.mutations % 10 === 0) addLog('새로운 색의 변이 출현 (누적 ' + stats.mutations + ')'); }
       }
@@ -1420,7 +1425,7 @@ function step(dt) {
       f.energy *= 0.55;
       const ng = mutate(g, 1);
       const child = spawnPred(f.x + rand(-10, 10), f.y + rand(-10, 10), ng, f.gen + 1, f.line);
-      if (child && child.rar >= 2) addChron(f.line + ' — ' + (child.rar === 3 ? '전설의' : '희귀한') + ' 변이 ' + child.name + ' 탄생 (' + (f.gen + 1) + '대)');
+      if (child && child.rar >= 2 && child.newMorph) addChron(f.line + ' — ' + (child.rar === 3 ? '전설의' : '희귀한') + ' 변이 ' + child.name + ' 탄생 (' + (f.gen + 1) + '대)');
       if (child) {
         stats.births++;
         if (f.gen + 1 > stats.maxGenPred) { stats.maxGenPred = f.gen + 1; addLog('포식자 ' + stats.maxGenPred + '세대 등장'); }
@@ -1490,7 +1495,7 @@ function step(dt) {
       f.energy *= 0.55;
       const ng = mutate(g, 1);
       const child = spawnShrimp(f.x + rand(-6, 6), f.y + rand(-6, 6), ng, f.gen + 1, f.line);
-      if (child && child.rar >= 2) addChron(f.line + ' — ' + (child.rar === 3 ? '전설의' : '희귀한') + ' 변이 ' + child.name + ' 탄생 (' + (f.gen + 1) + '대)');
+      if (child && child.rar >= 2 && child.newMorph) addChron(f.line + ' — ' + (child.rar === 3 ? '전설의' : '희귀한') + ' 변이 ' + child.name + ' 탄생 (' + (f.gen + 1) + '대)');
       if (child) {
         stats.births++;
         if (f.gen + 1 > (stats.maxGenShrimp || 1)) stats.maxGenShrimp = f.gen + 1;
@@ -1537,7 +1542,7 @@ function step(dt) {
       f.energy *= 0.6;
       const ng = mutate(g, 1);
       const child = spawnJelly(f.x + rand(-10, 10), f.y + rand(-10, 10), ng, f.gen + 1, f.line);
-      if (child && child.rar >= 2) addChron(f.line + ' — ' + (child.rar === 3 ? '전설의' : '희귀한') + ' 변이 ' + child.name + ' 탄생 (' + (f.gen + 1) + '대)');
+      if (child && child.rar >= 2 && child.newMorph) addChron(f.line + ' — ' + (child.rar === 3 ? '전설의' : '희귀한') + ' 변이 ' + child.name + ' 탄생 (' + (f.gen + 1) + '대)');
       if (child) {
         stats.births++;
         if (f.gen + 1 > (stats.maxGenJelly || 1)) stats.maxGenJelly = f.gen + 1;
@@ -1602,7 +1607,7 @@ function step(dt) {
       f.energy *= 0.6;
       const ng = mutate(g, 1);
       const child = spawnApex(f.x + rand(-14, 14), f.y + rand(-14, 14), ng, f.gen + 1, f.line);
-      if (child && child.rar >= 2) addChron(f.line + ' — ' + (child.rar === 3 ? '전설의' : '희귀한') + ' 변이 ' + child.name + ' 탄생 (' + (f.gen + 1) + '대)');
+      if (child && child.rar >= 2 && child.newMorph) addChron(f.line + ' — ' + (child.rar === 3 ? '전설의' : '희귀한') + ' 변이 ' + child.name + ' 탄생 (' + (f.gen + 1) + '대)');
       if (child) {
         stats.births++;
         if (f.gen + 1 > (stats.maxGenApex || 1)) { stats.maxGenApex = f.gen + 1; addLog('대형 포식자 ' + stats.maxGenApex + '세대 등장'); }
