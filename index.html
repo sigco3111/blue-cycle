@@ -101,6 +101,12 @@
   .toast span { color:#cbb98a; font-size:11.5px; }
   @keyframes toastIn { from { opacity:0; transform:translateY(16px) scale(.92); } to { opacity:1; transform:none; } }
   @keyframes toastOut { to { opacity:0; transform:translateY(-10px); } }
+  /* 가계 · 연대기 (v1.2) */
+  #lineGrid { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  #lineGrid .a { background:rgba(10,35,55,.4); border:1px solid rgba(120,190,230,.18); border-radius:8px; padding:6px 8px; font-size:11px; color:#8fb4c8; }
+  #lineGrid .a .nm { color:#dceef8; font-weight:600; }
+  #chronList { font-size:12px; line-height:1.75; color:#a9cede; }
+  #chronList .d { color:#5f96b5; margin-right:6px; font-variant-numeric:tabular-nums; }
   /* 사운드 행 (v0.9) */
   #sndRow { margin-top:6px; display:flex; gap:6px; align-items:center; }
   #sndRow #btnSnd {
@@ -178,7 +184,7 @@
 <canvas id="sea"></canvas>
 <div id="hud">
   <h1>푸른 순환</h1>
-  <div class="ver">생태계 수족관 · v1.1 · <span id="cFps">--</span>fps</div>
+  <div class="ver">생태계 수족관 · v1.2 · <span id="cFps">--</span>fps</div>
   <div class="stat"><span><span class="dot" style="background:#69d67c"></span>조류</span><b id="cAlgae">0</b></div>
   <div class="stat"><span><span class="dot" style="background:#8fd3e8"></span>초식어</span><b id="cHerb">0</b></div>
   <div class="stat"><span><span class="dot" style="background:#f0918a"></span>포식자</span><b id="cPred">0</b></div>
@@ -231,6 +237,8 @@
   <div class="sec"><div class="secT">생물량 비중</div><canvas id="chPie" class="chart" height="150"></canvas><div class="leg" id="pieLeg"></div></div>
   <div class="sec"><div class="secT">세대 · 기록</div><div class="gstat" id="genStats"></div></div>
   <div class="sec"><div class="secT">도전 과제 <span id="achCount" style="color:#dceef8"></span></div><div id="achGrid"></div></div>
+  <div class="sec"><div class="secT">가계 · 살아 있는 혈통</div><div id="lineGrid"></div></div>
+  <div class="sec"><div class="secT">수족관 연대기</div><div id="chronList"></div></div>
   <div class="sec"><div class="secT">도감 · 발견한 형태 <span id="dexCount" style="color:#dceef8"></span></div><div id="dexGrid"></div></div>
   <div class="sec"><div class="secT">관찰 일지</div><div id="dashLog"></div></div>
 </div>
@@ -240,7 +248,7 @@
 <script>
 'use strict';
 /* ============================================================
-   푸른 순환 v1.1 — 생태계 수족관 (사진 모드: 장면 캡처·기록 카드·저장/공유)
+   푸른 순환 v1.2 — 생태계 수족관 (수족관 이야기: 이름·가계·연대기)
    생산자(조류/수초) → 초식어 → 포식자, 개체 단위 시뮬레이션
    ============================================================ */
 const canvas = document.getElementById('sea');
@@ -322,6 +330,32 @@ let histAcc = 0;
 /* ---------- 업적 상태 (v1.0) — 선언 위치 주의: initWorld가 부팅 시 참조하므로 반드시 상단 ---------- */
 const ach = {}; /* id → 달성 일자 */
 let achQuiet = true; /* 로드 직후 첫 평가는 이미 이룬 기록이므로 조용히 반영 */
+
+/* ---------- 이름 · 가계 · 연대기 상태 (v1.2) — 상단 선언 필수: initWorld 부팅 참조 ---------- */
+const NAME_A = ['별','물','파','은','초','달','바','소','여','해','잔','모','봄','빛','안','청'];
+const NAME_B = ['나','리','솔','루','미','결','랑','름','온','기','치','비','로','새','무','연'];
+function nameTaken(n) {
+  for (const arr of [herbs, preds, shrimps, jellies, apexes]) for (const f of arr) if (f.name === n) return true;
+  return false;
+}
+function genName() {
+  let n = NAME_A[(Math.random() * NAME_A.length) | 0] + NAME_B[(Math.random() * NAME_B.length) | 0];
+  if (nameTaken(n)) n += NAME_B[(Math.random() * NAME_B.length) | 0];
+  return n;
+}
+function nameFish(f, isBorn, parentLine) {
+  f.name = genName();
+  f.line = (isBorn && parentLine) ? parentLine : f.name + '가';
+}
+const chronicle = []; /* 수족관 연대기 — {d, msg}, 최대 80 */
+const DAY_MARKS = [10, 30, 50, 100, 200, 365];
+const GEN_MARKS = [5, 10, 20];
+const storyState = { lines: null, dayMarks: new Set(), genMarks: new Set() };
+function addChron(msg) {
+  chronicle.push({ d: env.day, msg });
+  if (chronicle.length > 80) chronicle.shift();
+  if (typeof dashOpen !== 'undefined' && dashOpen) drawChron();
+}
 
 /* ---------- 도감 · 유전 (v0.5) ---------- */
 const HUE_BANDS = [
@@ -469,12 +503,14 @@ function mutate(g, amt) {
 /* ---------- 초식어 ---------- */
 const HERB_MAX = 220;
 const herbs = [];
-function spawnHerb(x, y, genes, gen) {
+function spawnHerb(x, y, genes, gen, line) {
   if (herbs.length >= HERB_MAX) return null;
   const g = genes || { size: rand(0.85, 1.15), speed: rand(0.9, 1.1), hue: rand(175, 205) };
-  recordMorph('herb', g);
+  const mo = recordMorph('herb', g);
   const f = baseFish(x !== undefined ? x : rand(30, W - 30), y !== undefined ? y : rand(H * 0.25, H * 0.75), g);
   f.gen = gen || 1;
+  f.rar = mo.rarity;
+  nameFish(f, f.gen > 1, line);
   herbs.push(f);
   return f;
 }
@@ -482,12 +518,14 @@ function spawnHerb(x, y, genes, gen) {
 /* ---------- 포식자 ---------- */
 const PRED_MAX = 6;
 const preds = [];
-function spawnPred(x, y, genes, gen) {
+function spawnPred(x, y, genes, gen, line) {
   if (preds.length >= PRED_MAX) return null;
   const g = genes || { size: rand(1.0, 1.2), speed: rand(0.95, 1.1), hue: rand(345, 375) % 360 };
-  recordMorph('pred', g);
+  const mo = recordMorph('pred', g);
   const f = baseFish(x !== undefined ? x : rand(40, W - 40), y !== undefined ? y : rand(H * 0.2, H * 0.6), g);
   f.gen = gen || 1;
+  f.rar = mo.rarity;
+  nameFish(f, f.gen > 1, line);
   f.energy = 80;
   preds.push(f);
   return f;
@@ -497,36 +535,42 @@ function spawnPred(x, y, genes, gen) {
 /* ---------- 새우 (분해자·청소부, v0.7) ---------- */
 const SHRIMP_MAX = 14;
 const shrimps = [];
-function spawnShrimp(x, y, genes, gen) {
+function spawnShrimp(x, y, genes, gen, line) {
   if (shrimps.length >= SHRIMP_MAX) return null;
   const g = genes || { size: rand(0.5, 0.7), speed: rand(1.1, 1.3), hue: rand(15, 38) };
-  recordMorph('shrimp', g);
+  const mo = recordMorph('shrimp', g);
   const f = baseFish(x !== undefined ? x : rand(20, W - 20), y !== undefined ? y : rand(H * 0.7, H - 30), g);
   f.gen = gen || 1;
+  f.rar = mo.rarity;
+  nameFish(f, f.gen > 1, line);
   shrimps.push(f);
   return f;
 }
 /* ---------- 해파리 (부유 필터 피더, v0.7) ---------- */
 const JELLY_MAX = 10;
 const jellies = [];
-function spawnJelly(x, y, genes, gen) {
+function spawnJelly(x, y, genes, gen, line) {
   if (jellies.length >= JELLY_MAX) return null;
   const g = genes || { size: rand(0.9, 1.3), speed: rand(0.6, 0.8), hue: rand(265, 300) };
-  recordMorph('jelly', g);
+  const mo = recordMorph('jelly', g);
   const f = baseFish(x !== undefined ? x : rand(30, W - 30), y !== undefined ? y : rand(H * 0.15, H * 0.6), g);
   f.gen = gen || 1;
+  f.rar = mo.rarity;
+  nameFish(f, f.gen > 1, line);
   jellies.push(f);
   return f;
 }
 /* ---------- 대형 포식자 (최상위, v0.7) ---------- */
 const APEX_MAX = 2;
 const apexes = [];
-function spawnApex(x, y, genes, gen) {
+function spawnApex(x, y, genes, gen, line) {
   if (apexes.length >= APEX_MAX) return null;
   const g = genes || { size: rand(2.0, 2.4), speed: rand(0.85, 1.0), hue: rand(205, 225) };
-  recordMorph('apex', g);
+  const mo = recordMorph('apex', g);
   const f = baseFish(x !== undefined ? x : rand(40, W - 40), y !== undefined ? y : rand(H * 0.25, H * 0.6), g);
   f.gen = gen || 1;
+  f.rar = mo.rarity;
+  nameFish(f, f.gen > 1, line);
   f.energy = 80;
   apexes.push(f);
   return f;
@@ -559,13 +603,13 @@ let firstBreedLogged = false, firstDeathLogged = false, firstHuntLogged = false;
 
 /* ---------- 초기 개체 ---------- */
 /* ---------- 저장 · 오프라인 정산 (v0.6) ---------- */
-const SAVE_VER = 9;
+const SAVE_VER = 10;
 const SAVE_KEY = n => 'blueCycle.save.' + n;
 const SLOT_KEY = 'blueCycle.slot';
 const IS_SIM = new URLSearchParams(location.search).has('sim');
 const activeSlot = () => { const n = parseInt(localStorage.getItem(SLOT_KEY) || '1', 10); return (n >= 1 && n <= 3) ? n : 1; };
 
-function packFish(f) { return [Math.round(f.x), Math.round(f.y), Math.round(f.energy), Math.round(f.age), f.gen, +f.genes.size.toFixed(3), +f.genes.speed.toFixed(3), Math.round(f.genes.hue)]; }
+function packFish(f) { return [Math.round(f.x), Math.round(f.y), Math.round(f.energy), Math.round(f.age), f.gen, +f.genes.size.toFixed(3), +f.genes.speed.toFixed(3), Math.round(f.genes.hue), f.name || '', f.line || '']; }
 function serialize() {
   return JSON.stringify({
     v: SAVE_VER, savedAt: Date.now(),
@@ -578,6 +622,9 @@ function serialize() {
     uplants: plants.filter(p => p.user).map(p => [Math.round(p.x), p.blades, Math.round(p.h)]),
     theme,
     ach: Object.entries(ach),
+    chronicle: chronicle.slice(-80),
+    dayMarks: [...storyState.dayMarks],
+    genMarks: [...storyState.genMarks],
   });
 }
 function readSlot(n) {
@@ -585,13 +632,15 @@ function readSlot(n) {
     const raw = localStorage.getItem(SAVE_KEY(n));
     if (!raw) return null;
     const d = JSON.parse(raw);
-    if (!d || (d.v !== SAVE_VER && d.v !== 6 && d.v !== 7 && d.v !== 8) || !d.env || !Array.isArray(d.herbs) || !Array.isArray(d.preds) || !Array.isArray(d.algae)) throw new Error('shape');
+    if (!d || (d.v !== SAVE_VER && d.v !== 6 && d.v !== 7 && d.v !== 8 && d.v !== 9) || !d.env || !Array.isArray(d.herbs) || !Array.isArray(d.preds) || !Array.isArray(d.algae)) throw new Error('shape');
     /* v6 → v7 마이그레이션: 새 종 배열이 없으면 빈 배열로 (기존 저장 슬롯 보존) */
     if (d.v === 6) { d.v = 7; d.shrimps = d.shrimps || []; d.jellies = d.jellies || []; d.apexes = d.apexes || []; }
     /* v7 → v8 마이그레이션: 장식·테마 기본값 */
     if (d.v === 7) { d.v = 8; d.decorations = d.decorations || []; d.uplants = d.uplants || []; d.theme = d.theme || 0; }
     /* v8 → v9 마이그레이션: 업적 기본값 */
-    if (d.v === 8) { d.v = SAVE_VER; d.ach = d.ach || []; }
+    if (d.v === 8) { d.v = 9; d.ach = d.ach || []; }
+    /* v9 → v10 마이그레이션: 이름·연대기 기본값 (이정표는 initWorld에서 조용히 선채움) */
+    if (d.v === 9) { d.v = SAVE_VER; d.chronicle = d.chronicle || []; d.dayMarks = d.dayMarks || null; d.genMarks = d.genMarks || null; }
     return d;
   } catch {
     /* 손상 데이터는 격리하고 슬롯을 비움 — 절대 깨진 상태로 시작하지 않음 */
@@ -632,13 +681,14 @@ function initWorld(d) {
   const unpack = (arr, kind) => {
     for (const p of arr) {
       if (!Array.isArray(p)) continue;
-      const [x, y, e, age, gen, sz, sp, hue] = p;
+      const [x, y, e, age, gen, sz, sp, hue, nm, ln] = p;
       if (![x, y, sz, sp, hue].every(isFinite)) continue;
       const g = { size: clamp(sz, 0.75, 1.45), speed: clamp(sp, 0.75, 1.35), hue: ((hue % 360) + 360) % 360 };
       const f = kind === 'herb'
         ? spawnHerb(clamp(x, 12, W - 12), clamp(y, 14, H - 22), g, (gen | 0) || 1)
         : spawnPred(clamp(x, 16, W - 16), clamp(y, 16, H - 30), g, (gen | 0) || 1);
-      if (f) { f.energy = clamp(e || 50, 1, 110); f.age = Math.max(0, age || 0); }
+      if (f) { f.energy = clamp(e || 50, 1, 110); f.age = Math.max(0, age || 0);
+        if (typeof nm === 'string' && nm) { f.name = nm; f.line = (typeof ln === 'string' && ln) ? ln : nm + '가'; } }
     }
   };
   unpack(d.herbs.slice(0, HERB_MAX), 'herb');
@@ -646,11 +696,12 @@ function initWorld(d) {
   const unpackNew = (arr, kind, cap, spawner) => {
     for (const p of (arr || []).slice(0, cap)) {
       if (!Array.isArray(p)) continue;
-      const [x, y, e, age, gen, sz, sp, hue] = p;
+      const [x, y, e, age, gen, sz, sp, hue, nm, ln] = p;
       if (![x, y, sz, sp, hue].every(isFinite)) continue;
       const g = { size: clamp(sz, 0.4, 2.6), speed: clamp(sp, 0.5, 1.5), hue: ((hue % 360) + 360) % 360 };
       const f = spawner(clamp(x, 10, W - 10), clamp(y, 14, H - 18), g, (gen | 0) || 1);
-      if (f) { f.energy = clamp(e || 50, 1, 130); f.age = Math.max(0, age || 0); }
+      if (f) { f.energy = clamp(e || 50, 1, 130); f.age = Math.max(0, age || 0);
+        if (typeof nm === 'string' && nm) { f.name = nm; f.line = (typeof ln === 'string' && ln) ? ln : nm + '가'; } }
     }
   };
   unpackNew(d.shrimps, 'shrimp', SHRIMP_MAX, spawnShrimp);
@@ -667,6 +718,15 @@ function initWorld(d) {
   }
   theme = clamp(d.theme | 0, 0, THEMES.length - 1);
   for (const kv of (d.ach || [])) if (Array.isArray(kv) && typeof kv[0] === 'string') ach[kv[0]] = kv[1] | 0;
+  for (const c of (d.chronicle || [])) if (c && typeof c.msg === 'string') chronicle.push({ d: c.d | 0, msg: String(c.msg).slice(0, 120) });
+  if (Array.isArray(d.dayMarks)) {
+    storyState.dayMarks = new Set(d.dayMarks);
+    storyState.genMarks = new Set(d.genMarks || []);
+  } else {
+    /* v9 이하 마이그레이션: 이미 지난 이정표는 기록 없이 조용히 채움 */
+    storyState.dayMarks = new Set(DAY_MARKS.filter(m => env.day >= m));
+    storyState.genMarks = new Set(GEN_MARKS.filter(m => Math.max(stats.maxGenHerb || 1, stats.maxGenPred || 1, stats.maxGenShrimp || 1, stats.maxGenJelly || 1, stats.maxGenApex || 1) >= m));
+  }
   restoring = false;
   return { savedAt: d.savedAt };
 }
@@ -742,7 +802,8 @@ function renderInspect() {
     `<div class="ih"><span class="idot" style="background:hsl(${g.hue},65%,60%)"></span>` +
     `<span class="inm">${m.name}</span><span class="rr c${m.rarity}">${RARITY[m.rarity]}</span>` +
     `<button class="ix" id="inspectX">닫기</button></div>` +
-    `<div class="igrid"><span>세대 <b>${f.gen}세대</b></span><span>나이 <b>${Math.floor(f.age)}초</b></span>` +
+    `<div class="igrid"><span>이름 <b>${f.name || '—'}</b></span><span>가계 <b>${f.line || '—'}</b></span>` +
+    `<span>세대 <b>${f.gen}세대</b></span><span>나이 <b>${Math.floor(f.age)}초</b></span>` +
     `<span>에너지 <b>${Math.round(f.energy)}</b></span><span>크기 <b>×${g.size.toFixed(2)}</b></span>` +
     `<span>속도 <b>×${g.speed.toFixed(2)}</b></span><span>색상 <b>${Math.round(g.hue)}°</b></span></div>`;
   inspectEl.classList.add('show');
@@ -994,6 +1055,34 @@ function toast(a) {
   while (box.children.length > 3) box.firstChild.remove();
 }
 setInterval(checkAchievements, 1000);
+
+/* ---------- 수족관 연대기 감시 (v1.2) — 혈통 단절·이정표 ---------- */
+function checkStory() {
+  const cur = new Map();
+  for (const [kind, arr, ko] of [['herb', herbs, '초식어'], ['pred', preds, '포식자'], ['shrimp', shrimps, '새우'], ['jelly', jellies, '해파리'], ['apex', apexes, '대형 포식자']])
+    for (const f of arr) {
+      const k = kind + ':' + (f.line || '—');
+      const e = cur.get(k) || { kind, ko, line: f.line || '—', n: 0, maxGen: 0 };
+      e.n++; if (f.gen > e.maxGen) e.maxGen = f.gen;
+      cur.set(k, e);
+    }
+  if (storyState.lines !== null)
+    for (const [k, v] of storyState.lines)
+      if (!cur.has(k)) addChron(v.ko + ' ' + v.line + '의 대가 끊겼다 (' + v.maxGen + '대까지 이어짐)');
+  storyState.lines = cur;
+  for (const dm of DAY_MARKS)
+    if (env.day >= dm && !storyState.dayMarks.has(dm)) {
+      storyState.dayMarks.add(dm);
+      addChron('수족관이 ' + dm + '일을 넘겼다 — ' + cur.size + '개 혈통이 살아 있다');
+    }
+  const mg = Math.max(stats.maxGenHerb || 1, stats.maxGenPred || 1, stats.maxGenShrimp || 1, stats.maxGenJelly || 1, stats.maxGenApex || 1);
+  for (const gm of GEN_MARKS)
+    if (mg >= gm && !storyState.genMarks.has(gm)) {
+      storyState.genMarks.add(gm);
+      addChron('혈통이 ' + gm + '대에 도달했다');
+    }
+}
+setInterval(checkStory, 1000);
 
 /* ---------- 사진 모드 (v1.1) — 장면을 이미지로 남기기, 기록은 수집될 뿐 ---------- */
 const photoModalEl = document.getElementById('photoModal');
@@ -1249,9 +1338,10 @@ function step(dt) {
     if (f.energy > 76 && f.age > 12 && herbs.length < 42) {
       f.energy *= 0.55;
       const ng = mutate(g, 1);
-      const child = spawnHerb(f.x + rand(-8, 8), f.y + rand(-8, 8), ng, f.gen + 1);
+      const child = spawnHerb(f.x + rand(-8, 8), f.y + rand(-8, 8), ng, f.gen + 1, f.line);
       if (child) {
         stats.births++;
+        if (child.rar >= 2) addChron(f.line + ' — ' + (child.rar === 3 ? '전설의' : '희귀한') + ' 변이 ' + child.name + ' 탄생 (' + (f.gen + 1) + '대)');
         if (f.gen + 1 > stats.maxGenHerb) { stats.maxGenHerb = f.gen + 1; if (stats.maxGenHerb >= 3) addLog('초식어 ' + stats.maxGenHerb + '세대 등장'); }
         if (Math.abs(ng.hue - g.hue) > 10) { stats.mutations++; if (stats.mutations <= 3 || stats.mutations % 10 === 0) addLog('새로운 색의 변이 출현 (누적 ' + stats.mutations + ')'); }
       }
@@ -1329,7 +1419,8 @@ function step(dt) {
     if (f.energy > 98 && f.age > 30 && preds.length < PRED_MAX) {
       f.energy *= 0.55;
       const ng = mutate(g, 1);
-      const child = spawnPred(f.x + rand(-10, 10), f.y + rand(-10, 10), ng, f.gen + 1);
+      const child = spawnPred(f.x + rand(-10, 10), f.y + rand(-10, 10), ng, f.gen + 1, f.line);
+      if (child && child.rar >= 2) addChron(f.line + ' — ' + (child.rar === 3 ? '전설의' : '희귀한') + ' 변이 ' + child.name + ' 탄생 (' + (f.gen + 1) + '대)');
       if (child) {
         stats.births++;
         if (f.gen + 1 > stats.maxGenPred) { stats.maxGenPred = f.gen + 1; addLog('포식자 ' + stats.maxGenPred + '세대 등장'); }
@@ -1398,7 +1489,8 @@ function step(dt) {
     if (f.energy > 72 && f.age > 15 && shrimps.length < SHRIMP_MAX) {
       f.energy *= 0.55;
       const ng = mutate(g, 1);
-      const child = spawnShrimp(f.x + rand(-6, 6), f.y + rand(-6, 6), ng, f.gen + 1);
+      const child = spawnShrimp(f.x + rand(-6, 6), f.y + rand(-6, 6), ng, f.gen + 1, f.line);
+      if (child && child.rar >= 2) addChron(f.line + ' — ' + (child.rar === 3 ? '전설의' : '희귀한') + ' 변이 ' + child.name + ' 탄생 (' + (f.gen + 1) + '대)');
       if (child) {
         stats.births++;
         if (f.gen + 1 > (stats.maxGenShrimp || 1)) stats.maxGenShrimp = f.gen + 1;
@@ -1444,7 +1536,8 @@ function step(dt) {
     if (f.energy > 82 && f.age > 25 && jellies.length < JELLY_MAX) {
       f.energy *= 0.6;
       const ng = mutate(g, 1);
-      const child = spawnJelly(f.x + rand(-10, 10), f.y + rand(-10, 10), ng, f.gen + 1);
+      const child = spawnJelly(f.x + rand(-10, 10), f.y + rand(-10, 10), ng, f.gen + 1, f.line);
+      if (child && child.rar >= 2) addChron(f.line + ' — ' + (child.rar === 3 ? '전설의' : '희귀한') + ' 변이 ' + child.name + ' 탄생 (' + (f.gen + 1) + '대)');
       if (child) {
         stats.births++;
         if (f.gen + 1 > (stats.maxGenJelly || 1)) stats.maxGenJelly = f.gen + 1;
@@ -1508,7 +1601,8 @@ function step(dt) {
     if (f.energy > 105 && f.age > 150 && apexes.length < APEX_MAX) {
       f.energy *= 0.6;
       const ng = mutate(g, 1);
-      const child = spawnApex(f.x + rand(-14, 14), f.y + rand(-14, 14), ng, f.gen + 1);
+      const child = spawnApex(f.x + rand(-14, 14), f.y + rand(-14, 14), ng, f.gen + 1, f.line);
+      if (child && child.rar >= 2) addChron(f.line + ' — ' + (child.rar === 3 ? '전설의' : '희귀한') + ' 변이 ' + child.name + ' 탄생 (' + (f.gen + 1) + '대)');
       if (child) {
         stats.births++;
         if (f.gen + 1 > (stats.maxGenApex || 1)) { stats.maxGenApex = f.gen + 1; addLog('대형 포식자 ' + stats.maxGenApex + '세대 등장'); }
@@ -1550,8 +1644,9 @@ function step(dt) {
       if (preds.length <= 4) {
         env.herbRescue -= dt;
         if (env.herbRescue <= 0) {
-          spawnHerb(); spawnHerb(); spawnHerb();
+          const rf = spawnHerb(); spawnHerb(); spawnHerb();
           env.herbGone = false;
+          if (rf) addChron(rf.line + ' 정착 — 초식어 ' + rf.name + '의 무리가 흘러들었다');
           addLog('어디선가 초식어 무리가 흘러들었다');
           stats.recoveries = (stats.recoveries || 0) + 1;
         }
@@ -1563,23 +1658,24 @@ function step(dt) {
     if (env.predRescue < 0 && herbs.length > 12) env.predRescue = 20;
     if (env.predRescue >= 0) {
       env.predRescue -= dt;
-      if (env.predRescue < 0) { spawnPred(); env.predGone = false; addLog('어디선가 포식자가 흘러들었다'); stats.recoveries = (stats.recoveries || 0) + 1; }
+      if (env.predRescue < 0) { const rf = spawnPred(); env.predGone = false; addLog('어디선가 포식자가 흘러들었다'); stats.recoveries = (stats.recoveries || 0) + 1; if (rf) addChron(rf.line + ' 정착 — 포식자 ' + rf.name + '의 유입'); }
     }
   } else { env.predGone = false; env.predRescue = -1; }
   /* 새우·해파리·대형 포식자 회복 (v0.7) */
   if (shrimps.length === 0 && detritus.length + algae.length > 40) {
     if (!env.shrimpGone) { env.shrimpGone = true; }
-    if (Math.random() < dt * 0.05) { spawnShrimp(); spawnShrimp(); env.shrimpGone = false; addLog('바닥에서 새우 한 쌍이 기어 나왔다'); stats.recoveries = (stats.recoveries || 0) + 1; }
+    if (Math.random() < dt * 0.05) { const rf = spawnShrimp(); spawnShrimp(); env.shrimpGone = false; addLog('바닥에서 새우 한 쌍이 기어 나왔다'); stats.recoveries = (stats.recoveries || 0) + 1; if (rf) addChron(rf.line + ' 정착 — 새우 ' + rf.name + '의 한 쌍'); }
   }
   if (jellies.length === 0 && Math.random() < dt * 0.02) {
-    spawnJelly();
+    const rf = spawnJelly();
+    if (rf) addChron(rf.line + ' 정착 — 해파리 ' + rf.name + '의 유입');
     addLog('해파리가 물결을 타고 흘러들었다');
     stats.recoveries = (stats.recoveries || 0) + 1;
   }
   if (apexes.length === 0 && preds.length >= 3) {
     if (env.apexRescue === undefined || env.apexRescue < 0) env.apexRescue = 60;
     env.apexRescue -= dt;
-    if (env.apexRescue < 0) { spawnApex(); addLog('그림자 같은 대형 포식자가 나타났다'); stats.recoveries = (stats.recoveries || 0) + 1; }
+    if (env.apexRescue < 0) { const rf = spawnApex(); addLog('그림자 같은 대형 포식자가 나타났다'); stats.recoveries = (stats.recoveries || 0) + 1; if (rf) addChron(rf.line + ' 정착 — 대형 포식자 ' + rf.name + '의 출현'); }
   } else if (apexes.length > 0) env.apexRescue = -1;
 }
 
@@ -2180,8 +2276,26 @@ function drawAch() {
       : `<div class="a lock"><span class="nm">🔒 ${a.name}</span><br>${a.desc}</div>`;
   }).join('');
 }
+function drawChron() {
+  const lines = new Map();
+  for (const [ko, arr] of [['초식어', herbs], ['포식자', preds], ['새우', shrimps], ['해파리', jellies], ['대형', apexes]])
+    for (const f of arr) {
+      const k = ko + ' ' + (f.line || '—');
+      const e = lines.get(k) || { n: 0, maxGen: 0 };
+      e.n++; if (f.gen > e.maxGen) e.maxGen = f.gen;
+      lines.set(k, e);
+    }
+  const top = [...lines.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 8);
+  document.getElementById('lineGrid').innerHTML = top.length
+    ? top.map(([k, v]) => `<div class="a"><span class="nm">${k}</span><br>${v.n}마리 · 최고 ${v.maxGen}대</div>`).join('')
+    : '<div class="a">아직 혈통이 없습니다</div>';
+  document.getElementById('chronList').innerHTML = chronicle.length
+    ? chronicle.slice().reverse().map(c => `<div><span class="d">${c.d}일</span>${c.msg}</div>`).join('')
+    : '<div style="color:#5f96b5">혈통의 정착·탄생·단절이 여기에 기록됩니다</div>';
+}
 function drawDash() {
   drawAch();
+  drawChron();
   drawDex();
   drawEnvStats();
   drawEnvChart();
@@ -2350,4 +2464,4 @@ if (simQ) {
 }
 </script>
 </body>
-</html>
+  </html>
