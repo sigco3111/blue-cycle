@@ -184,7 +184,7 @@
 <canvas id="sea"></canvas>
 <div id="hud">
   <h1>푸른 순환</h1>
-  <div class="ver">생태계 수족관 · v1.2 · <span id="cFps">--</span>fps</div>
+  <div class="ver">생태계 수족관 · v1.3 · <span id="cFps">--</span>fps</div>
   <div class="stat"><span><span class="dot" style="background:#69d67c"></span>조류</span><b id="cAlgae">0</b></div>
   <div class="stat"><span><span class="dot" style="background:#8fd3e8"></span>초식어</span><b id="cHerb">0</b></div>
   <div class="stat"><span><span class="dot" style="background:#f0918a"></span>포식자</span><b id="cPred">0</b></div>
@@ -248,7 +248,7 @@
 <script>
 'use strict';
 /* ============================================================
-   푸른 순환 v1.2 — 생태계 수족관 (수족관 이야기: 이름·가계·연대기)
+   푸른 순환 v1.3 — 생태계 수족관 (성능 최적화: 시그니처 기반 DOM 갱신 생략)
    생산자(조류/수초) → 초식어 → 포식자, 개체 단위 시뮬레이션
    ============================================================ */
 const canvas = document.getElementById('sea');
@@ -803,6 +803,9 @@ function renderInspect() {
   const f = selFish, g = f.genes;
   const kind = herbs.includes(f) ? 'herb' : preds.includes(f) ? 'pred' : shrimps.includes(f) ? 'shrimp' : jellies.includes(f) ? 'jelly' : 'apex';
   const m = morphOf(kind, g);
+  const isig = [f.name, f.line, f.gen, Math.floor(f.age), Math.round(f.energy), g.size, g.speed, Math.round(g.hue), m.name, m.rarity].join('|');
+  if (_sigCache.inspect === isig) { inspectEl.classList.add('show'); return; }
+  _sigCache.inspect = isig;
   inspectEl.innerHTML =
     `<div class="ih"><span class="idot" style="background:hsl(${g.hue},65%,60%)"></span>` +
     `<span class="inm">${m.name}</span><span class="rr c${m.rarity}">${RARITY[m.rarity]}</span>` +
@@ -2055,6 +2058,14 @@ function drawBubbles() {
 }
 
 /* ---------- HUD ---------- */
+/* ---------- DOM 갱신 시그니처 캐시 (v1.3 성능) — 내용이 같으면 innerHTML 재작성 생략 ---------- */
+const _sigCache = {};
+function sigRedraw(key, sig, fn) {
+  if (_sigCache[key] === sig) return;
+  _sigCache[key] = sig;
+  fn();
+}
+
 const elA = document.getElementById('cAlgae'), elH = document.getElementById('cHerb'),
       elP = document.getElementById('cPred'), elT = document.getElementById('cTime'),
       elF = document.getElementById('cFps');
@@ -2210,14 +2221,21 @@ function drawGenStats() {
 }
 
 function drawDex() {
+  let totalSeen = 0;
+  for (const m of codex.values()) totalSeen += m.seen;
   const arr = [...codex.values()].sort((a, b) => b.rarity - a.rarity || a.firstDay - b.firstDay);
   document.getElementById('dexCount').textContent = arr.length + '종';
+  if (_sigCache.dex === arr.length + ':' + totalSeen) return;
+  _sigCache.dex = arr.length + ':' + totalSeen;
   document.getElementById('dexGrid').innerHTML = arr.map(m =>
     `<div class="m"><span class="dot" style="background:hsl(${m.hue},65%,55%)"></span>` +
     `<span><span class="nm">${m.name}</span><br>${m.firstDay}일 발견 · ${m.seen}마리</span>` +
     `<span class="rr c${m.rarity}">${RARITY[m.rarity]}</span></div>`).join('');
 }
 function renderDashLog() {
+  const lsig = logs.length + '|' + (logs.length ? logs[logs.length - 1].msg : '');
+  if (_sigCache.dlog === lsig) return;
+  _sigCache.dlog = lsig;
   document.getElementById('dashLog').innerHTML = logs.slice().reverse().map(l =>
     `<div><span class="d">${l.d}일</span>${l.msg}</div>`).join('');
 }
@@ -2274,6 +2292,9 @@ function drawEnvChart() {
 function drawAch() {
   const done = ACHIEVEMENTS.filter(a => ach[a.id] !== undefined).length;
   document.getElementById('achCount').textContent = done + ' / ' + ACHIEVEMENTS.length;
+  let daySum = 0; for (const k in ach) daySum += ach[k];
+  if (_sigCache.ach === done + ':' + daySum) return;
+  _sigCache.ach = done + ':' + daySum;
   document.getElementById('achGrid').innerHTML = ACHIEVEMENTS.map(a => {
     const d = ach[a.id];
     return d !== undefined
@@ -2282,6 +2303,11 @@ function drawAch() {
   }).join('');
 }
 function drawChron() {
+  const csig = chronicle.length + '|' + (chronicle.length ? chronicle[chronicle.length - 1].msg : '') + '|' +
+    herbs.length + ',' + preds.length + ',' + shrimps.length + ',' + jellies.length + ',' + apexes.length + '|' +
+    (stats.maxGenHerb || 1) + ',' + (stats.maxGenPred || 1) + ',' + (stats.maxGenShrimp || 1) + ',' + (stats.maxGenJelly || 1) + ',' + (stats.maxGenApex || 1);
+  if (_sigCache.chron === csig) return;
+  _sigCache.chron = csig;
   const lines = new Map();
   for (const [ko, arr] of [['초식어', herbs], ['포식자', preds], ['새우', shrimps], ['해파리', jellies], ['대형', apexes]])
     for (const f of arr) {
@@ -2469,4 +2495,4 @@ if (simQ) {
 }
 </script>
 </body>
-    </html>
+  </html>
