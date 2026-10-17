@@ -121,6 +121,26 @@
     border-radius: 9px; padding: 7px 10px; font-size: 13px; cursor: pointer;
   }
   #decoBar button.on { background: rgba(80,150,190,0.9); color: #04121e; font-weight: 700; }
+  /* 사진 모드 (v1.1) */
+  #photoModal {
+    position:fixed; inset:0; z-index:32; display:none; align-items:center; justify-content:center;
+    background:rgba(2,8,16,.72); backdrop-filter:blur(3px);
+  }
+  #photoModal.show { display:flex; }
+  #photoBox {
+    background:rgba(8,22,36,.96); border:1px solid rgba(120,190,230,.28); border-radius:14px;
+    padding:12px 14px; max-width:94vw; display:flex; flex-direction:column; gap:8px; align-items:center;
+  }
+  #photoBox h2 { margin:0; font-size:15px; color:#dceef8; }
+  #photoImg { max-width:88vw; max-height:58vh; border-radius:10px; border:1px solid rgba(120,190,230,.2); }
+  #photoCardRow { font-size:12px; color:#8fb4c8; display:flex; gap:5px; align-items:center; cursor:pointer; }
+  #photoCardRow input { accent-color:#6fc3e8; }
+  #photoBtns { display:flex; gap:8px; }
+  #photoBtns button {
+    background:rgba(30,60,86,.8); color:#cfe8f4; border:1px solid rgba(120,190,230,.3);
+    border-radius:9px; padding:7px 14px; font-size:13px; cursor:pointer; font-family:inherit;
+  }
+  #photoBtns button:hover { background:rgba(60,110,150,.85); }
   /* 저장 모달 · 정산 카드 (v0.6) */
   #saveModal {
     position:fixed; inset:0; z-index:30; display:none; align-items:center; justify-content:center;
@@ -158,7 +178,7 @@
 <canvas id="sea"></canvas>
 <div id="hud">
   <h1>푸른 순환</h1>
-  <div class="ver">생태계 수족관 · v1.0 · <span id="cFps">--</span>fps</div>
+  <div class="ver">생태계 수족관 · v1.1 · <span id="cFps">--</span>fps</div>
   <div class="stat"><span><span class="dot" style="background:#69d67c"></span>조류</span><b id="cAlgae">0</b></div>
   <div class="stat"><span><span class="dot" style="background:#8fd3e8"></span>초식어</span><b id="cHerb">0</b></div>
   <div class="stat"><span><span class="dot" style="background:#f0918a"></span>포식자</span><b id="cPred">0</b></div>
@@ -173,6 +193,7 @@
     <button id="btnDeco">꾸미기</button>
     <button id="btnDash">지표</button>
     <button id="btnSave">저장</button>
+    <button id="btnPhoto" title="사진 모드">📸</button>
   </div>
   <div id="sndRow">
     <button id="btnSnd" title="소리 켜기/끄기">🔊</button>
@@ -182,6 +203,18 @@
 <div id="inspect"></div>
 <div id="settle"></div>
 <div id="saveModal"><div id="saveBox"></div></div>
+<div id="photoModal">
+  <div id="photoBox">
+    <h2>📸 사진 모드</h2>
+    <img id="photoImg" alt="수족관 사진 미리보기">
+    <label id="photoCardRow"><input type="checkbox" id="photoCard" checked> 기록 카드 포함</label>
+    <div id="photoBtns">
+      <button id="btnPhotoDl">저장</button>
+      <button id="btnPhotoShare">공유</button>
+      <button id="btnPhotoClose">닫기</button>
+    </div>
+  </div>
+</div>
 <div id="decoBar">
   <button data-tool="rock" class="on">🪨 바위</button>
   <button data-tool="coral">🪸 산호</button>
@@ -207,7 +240,7 @@
 <script>
 'use strict';
 /* ============================================================
-   푸른 순환 v1.0 — 생태계 수족관 (도전 과제: 업적·달성 연출·대시보드 패널)
+   푸른 순환 v1.1 — 생태계 수족관 (사진 모드: 장면 캡처·기록 카드·저장/공유)
    생산자(조류/수초) → 초식어 → 포식자, 개체 단위 시뮬레이션
    ============================================================ */
 const canvas = document.getElementById('sea');
@@ -846,6 +879,18 @@ function sfx(kind) {
       o.connect(g); g.connect(masterGain);
       o.start(t1); o.stop(t1 + 0.65);
     });
+  } else if (kind === 'shutter') {
+    /* 사진: 셔터 두 번의 짧은 클릭 */
+    [0, 0.08].forEach(dt2 => {
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = 'square'; o.frequency.value = 1900;
+      const t1 = t0 + dt2;
+      g.gain.setValueAtTime(0.0001, t1);
+      g.gain.exponentialRampToValueAtTime(0.07, t1 + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, t1 + 0.05);
+      o.connect(g); g.connect(masterGain);
+      o.start(t1); o.stop(t1 + 0.06);
+    });
   } else if (kind === 'achieve') {
     /* 업적: 금속성 팡파르 */
     [587, 740, 880].forEach((fq, i) => {
@@ -946,6 +991,103 @@ function toast(a) {
   while (box.children.length > 3) box.firstChild.remove();
 }
 setInterval(checkAchievements, 1000);
+
+/* ---------- 사진 모드 (v1.1) — 장면을 이미지로 남기기, 기록은 수집될 뿐 ---------- */
+const photoModalEl = document.getElementById('photoModal');
+const photoImg = document.getElementById('photoImg');
+const photoCardChk = document.getElementById('photoCard');
+const btnPhotoDl = document.getElementById('btnPhotoDl');
+const btnPhotoShare = document.getElementById('btnPhotoShare');
+let photoBlob = null, photoURL = null, photoName = '푸른순환.png';
+
+function roundRect(c, x, y, w, h, r) {
+  c.beginPath();
+  c.moveTo(x + r, y);
+  c.arcTo(x + w, y, x + w, y + h, r);
+  c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r);
+  c.arcTo(x, y, x + w, y, r);
+  c.closePath();
+}
+
+function composePhoto(withCard, cb) {
+  const w = canvas.width, h = canvas.height;
+  const out = document.createElement('canvas');
+  out.width = w; out.height = h;
+  const c = out.getContext('2d');
+  c.drawImage(canvas, 0, 0);
+  if (withCard) {
+    const u = DPR; /* 물리 픽셀 기준 스케일 */
+    const ch = 92 * u, m = 12 * u, y = h - ch - m, x = m, cw = w - m * 2;
+    c.fillStyle = 'rgba(6,18,30,.82)';
+    c.strokeStyle = 'rgba(240,205,110,.5)';
+    c.lineWidth = 1 * u;
+    roundRect(c, x, y, cw, ch, 10 * u);
+    c.fill(); c.stroke();
+    c.textBaseline = 'alphabetic';
+    c.fillStyle = '#f2d98a';
+    c.font = '700 ' + (15 * u) + 'px sans-serif';
+    c.fillText('푸른 순환 · 생태계 수족관', x + 12 * u, y + 22 * u);
+    c.fillStyle = '#dceef8';
+    c.font = (11 * u) + 'px sans-serif';
+    c.fillText('생존 ' + env.day + '일째 · 도감 ' + codex.size + '종 · 업적 ' + Object.keys(ach).length + '/' + ACHIEVEMENTS.length,
+      x + 12 * u, y + 44 * u);
+    c.fillStyle = '#8fb4c8';
+    c.font = (10 * u) + 'px sans-serif';
+    const now = new Date();
+    c.fillText('최고 세대 초식 ' + stats.maxGenHerb + ' · 포식 ' + stats.maxGenPred +
+      ' · 조류 ' + algae.length + ' · ' + now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0'),
+      x + 12 * u, y + 64 * u);
+    c.fillText('방치해도 생태계가 저절로 돌아갑니다', x + 12 * u, y + 80 * u);
+  }
+  out.toBlob(b => cb(b), 'image/png');
+}
+
+function openPhoto() {
+  if (decoMode) return; /* 꾸미기 중엔 배치 우선 */
+  sfx('shutter');
+  composePhoto(photoCardChk.checked, b => {
+    if (!b) return;
+    photoBlob = b;
+    if (photoURL) URL.revokeObjectURL(photoURL);
+    photoURL = URL.createObjectURL(b);
+    photoImg.src = photoURL;
+    photoName = '푸른순환-' + env.day + '일.png';
+    const file = new File([b], photoName, { type: 'image/png' });
+    btnPhotoShare.style.display = (navigator.canShare && navigator.canShare({ files: [file] })) ? '' : 'none';
+    photoModalEl.classList.add('show');
+    addLog('수족관 사진을 남겼다');
+  });
+}
+
+document.getElementById('btnPhoto').addEventListener('click', openPhoto);
+photoCardChk.addEventListener('change', () => {
+  if (!photoModalEl.classList.contains('show')) return;
+  composePhoto(photoCardChk.checked, b => {
+    if (!b) return;
+    photoBlob = b;
+    if (photoURL) URL.revokeObjectURL(photoURL);
+    photoURL = URL.createObjectURL(b);
+    photoImg.src = photoURL;
+  });
+});
+btnPhotoDl.addEventListener('click', () => {
+  if (!photoURL) return;
+  const a = document.createElement('a');
+  a.href = photoURL; a.download = photoName;
+  document.body.appendChild(a); a.click(); a.remove();
+});
+btnPhotoShare.addEventListener('click', () => {
+  if (!photoBlob) return;
+  const file = new File([photoBlob], photoName, { type: 'image/png' });
+  navigator.share({
+    files: [file],
+    title: '푸른 순환',
+    text: '푸른 순환 ' + env.day + '일차 — 도감 ' + codex.size + '종, 업적 ' + Object.keys(ach).length + '/' + ACHIEVEMENTS.length,
+  }).catch(() => {});
+});
+document.getElementById('btnPhotoClose').addEventListener('click', () => photoModalEl.classList.remove('show'));
+photoModalEl.addEventListener('click', e => { if (e.target === photoModalEl) photoModalEl.classList.remove('show'); });
 
 /* ---------- 일시정지/속도 ---------- */
 let paused = false, speed = 1;
