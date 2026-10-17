@@ -184,7 +184,7 @@
 <canvas id="sea"></canvas>
 <div id="hud">
   <h1>푸른 순환</h1>
-  <div class="ver">생태계 수족관 · v1.4 · <span id="cFps">--</span>fps</div>
+  <div class="ver">생태계 수족관 · v1.5 · <span id="cFps">--</span>fps</div>
   <div class="stat"><span><span class="dot" style="background:#69d67c"></span>조류</span><b id="cAlgae">0</b></div>
   <div class="stat"><span><span class="dot" style="background:#8fd3e8"></span>초식어</span><b id="cHerb">0</b></div>
   <div class="stat"><span><span class="dot" style="background:#f0918a"></span>포식자</span><b id="cPred">0</b></div>
@@ -238,6 +238,7 @@
   <div class="sec"><div class="secT">세대 · 기록</div><div class="gstat" id="genStats"></div></div>
   <div class="sec"><div class="secT">도전 과제 <span id="achCount" style="color:#dceef8"></span></div><div id="achGrid"></div></div>
   <div class="sec"><div class="secT">가계 · 살아 있는 혈통</div><div id="lineGrid"></div></div>
+  <div class="sec"><div class="secT">혈통 계보도 · 시간의 흐름</div><canvas id="chLines" class="chart" height="200"></canvas><div class="leg" id="linesLeg"></div></div>
   <div class="sec"><div class="secT">수족관 연대기</div><div id="chronList"></div></div>
   <div class="sec"><div class="secT">도감 · 발견한 형태 <span id="dexCount" style="color:#dceef8"></span></div><div id="dexGrid"></div></div>
   <div class="sec"><div class="secT">관찰 일지</div><div id="dashLog"></div></div>
@@ -248,7 +249,7 @@
 <script>
 'use strict';
 /* ============================================================
-   푸른 순환 v1.4 — 생태계 수족관 (계절·장기 이벤트: 산란기·적조·한파)
+   푸른 순환 v1.5 — 생태계 수족관 (혈통 계보도: 시간의 흐름으로 보는 가계)
    생산자(조류/수초) → 초식어 → 포식자, 개체 단위 시뮬레이션
    ============================================================ */
 const canvas = document.getElementById('sea');
@@ -387,6 +388,28 @@ function seasonTint() {
   const ev = seasonEventNow();
   if (ev && SEASON_EVENTS[ev.id]) return SEASON_EVENTS[ev.id].tint;
   return seasonNow().tint;
+}
+
+/* ---------- 혈통 계보 (v1.5) — 상단 선언 필수: initWorld 부팅 참조 ----------
+   혈통의 탄생(정착)·세대 성장·단절을 누적 기록해 대시보드 계보도에 그림 */
+const lineBook = new Map(); /* 'kind:line' → {kind, ko, line, founded, founder, births, maxGen, extinct} */
+const LINE_BOOK_MAX = 120;
+const LINE_KIND_COLOR = { herb: '#8fd3e8', pred: '#f0918a', shrimp: '#e8c39a', jelly: '#c9a8f0', apex: '#93a8c8' };
+function lineBookRecord(kind, ko, f, isBorn) {
+  if (!f.line) return;
+  const key = kind + ':' + f.line;
+  let e = lineBook.get(key);
+  if (!e) {
+    e = { kind, ko, line: f.line, founded: env.day, founder: isBorn ? null : f.name, births: 0, maxGen: f.gen, extinct: null };
+    lineBook.set(key, e);
+    if (lineBook.size > LINE_BOOK_MAX) {
+      let oldestKey = null, oldestDay = Infinity;
+      for (const [k, v] of lineBook) if (v.extinct !== null && v.extinct < oldestDay) { oldestDay = v.extinct; oldestKey = k; }
+      lineBook.delete(oldestKey !== null ? oldestKey : lineBook.keys().next().value);
+    }
+  }
+  if (f.gen > e.maxGen) e.maxGen = f.gen;
+  if (isBorn) e.births++;
 }
 
 /* ---------- 도감 · 유전 (v0.5) ---------- */
@@ -544,6 +567,7 @@ function spawnHerb(x, y, genes, gen, line) {
   f.rar = morphOf('herb', g).rarity;
   f.newMorph = !!(_mo && _mo.seen === 1);
   nameFish(f, f.gen > 1, line);
+  if (!restoring) lineBookRecord('herb', '초식어', f, f.gen > 1 && !!line);
   herbs.push(f);
   return f;
 }
@@ -560,6 +584,7 @@ function spawnPred(x, y, genes, gen, line) {
   f.rar = morphOf('pred', g).rarity;
   f.newMorph = !!(_mo && _mo.seen === 1);
   nameFish(f, f.gen > 1, line);
+  if (!restoring) lineBookRecord('pred', '포식자', f, f.gen > 1 && !!line);
   f.energy = 80;
   preds.push(f);
   return f;
@@ -578,6 +603,7 @@ function spawnShrimp(x, y, genes, gen, line) {
   f.rar = morphOf('shrimp', g).rarity;
   f.newMorph = !!(_mo && _mo.seen === 1);
   nameFish(f, f.gen > 1, line);
+  if (!restoring) lineBookRecord('shrimp', '새우', f, f.gen > 1 && !!line);
   shrimps.push(f);
   return f;
 }
@@ -593,6 +619,7 @@ function spawnJelly(x, y, genes, gen, line) {
   f.rar = morphOf('jelly', g).rarity;
   f.newMorph = !!(_mo && _mo.seen === 1);
   nameFish(f, f.gen > 1, line);
+  if (!restoring) lineBookRecord('jelly', '해파리', f, f.gen > 1 && !!line);
   jellies.push(f);
   return f;
 }
@@ -608,6 +635,7 @@ function spawnApex(x, y, genes, gen, line) {
   f.rar = morphOf('apex', g).rarity;
   f.newMorph = !!(_mo && _mo.seen === 1);
   nameFish(f, f.gen > 1, line);
+  if (!restoring) lineBookRecord('apex', '대형 포식자', f, f.gen > 1 && !!line);
   f.energy = 80;
   apexes.push(f);
   return f;
@@ -640,7 +668,7 @@ let firstBreedLogged = false, firstDeathLogged = false, firstHuntLogged = false;
 
 /* ---------- 초기 개체 ---------- */
 /* ---------- 저장 · 오프라인 정산 (v0.6) ---------- */
-const SAVE_VER = 11;
+const SAVE_VER = 12;
 const SAVE_KEY = n => 'blueCycle.save.' + n;
 const SLOT_KEY = 'blueCycle.slot';
 const IS_SIM = new URLSearchParams(location.search).has('sim');
@@ -663,6 +691,7 @@ function serialize() {
     dayMarks: [...storyState.dayMarks],
     genMarks: [...storyState.genMarks],
     seasonEv: env.seasonEv,
+    lineBook: [...lineBook.values()],
   });
 }
 function readSlot(n) {
@@ -670,7 +699,7 @@ function readSlot(n) {
     const raw = localStorage.getItem(SAVE_KEY(n));
     if (!raw) return null;
     const d = JSON.parse(raw);
-    if (!d || (d.v !== SAVE_VER && d.v !== 6 && d.v !== 7 && d.v !== 8 && d.v !== 9 && d.v !== 10) || !d.env || !Array.isArray(d.herbs) || !Array.isArray(d.preds) || !Array.isArray(d.algae)) throw new Error('shape');
+    if (!d || (d.v !== SAVE_VER && d.v !== 6 && d.v !== 7 && d.v !== 8 && d.v !== 9 && d.v !== 10 && d.v !== 11) || !d.env || !Array.isArray(d.herbs) || !Array.isArray(d.preds) || !Array.isArray(d.algae)) throw new Error('shape');
     /* v6 → v7 마이그레이션: 새 종 배열이 없으면 빈 배열로 (기존 저장 슬롯 보존) */
     if (d.v === 6) { d.v = 7; d.shrimps = d.shrimps || []; d.jellies = d.jellies || []; d.apexes = d.apexes || []; }
     /* v7 → v8 마이그레이션: 장식·테마 기본값 */
@@ -681,6 +710,8 @@ function readSlot(n) {
     if (d.v === 9) { d.v = SAVE_VER; d.chronicle = d.chronicle || []; d.dayMarks = d.dayMarks || null; d.genMarks = d.genMarks || null; }
     /* v10 → v11 마이그레이션: 계절 이벤트 기본값 (계절 자체는 경과 일수에서 결정론적으로 계산) */
     if (d.v === 10) { d.v = SAVE_VER; d.seasonEv = null; }
+    /* v11 → v12 마이그레이션: 혈통 계보 기본값 (살아 있는 개체로 initWorld에서 조용히 시드) */
+    if (d.v === 11) { d.v = SAVE_VER; d.lineBook = null; }
     return d;
   } catch {
     /* 손상 데이터는 격리하고 슬롯을 비움 — 절대 깨진 상태로 시작하지 않음 */
@@ -696,6 +727,7 @@ function readSlot(n) {
 let restoring = false;
 let settling = false; /* 오프라인 정산 중에는 계절·이벤트 로그를 누르고 상태만 진행 */
 function initWorld(d) {
+  lineBook.clear();
   if (!d) {
     for (let i = 0; i < 130; i++) spawnAlgae();
     for (let i = 0; i < 26; i++) spawnHerb();
@@ -770,6 +802,27 @@ function initWorld(d) {
     /* v9 이하 마이그레이션: 이미 지난 이정표는 기록 없이 조용히 채움 */
     storyState.dayMarks = new Set(DAY_MARKS.filter(m => env.day >= m));
     storyState.genMarks = new Set(GEN_MARKS.filter(m => Math.max(stats.maxGenHerb || 1, stats.maxGenPred || 1, stats.maxGenShrimp || 1, stats.maxGenJelly || 1, stats.maxGenApex || 1) >= m));
+  }
+  /* 혈통 계보 복원 — 없으면(v11 이하) 살아 있는 개체로 조용히 시드 */
+  if (Array.isArray(d.lineBook)) {
+    for (const e of d.lineBook) {
+      if (!e || typeof e.line !== 'string' || typeof e.kind !== 'string') continue;
+      lineBook.set(e.kind + ':' + e.line, {
+        kind: e.kind, ko: String(e.ko || ''), line: e.line,
+        founded: e.founded | 0, founder: typeof e.founder === 'string' ? e.founder : null,
+        births: e.births | 0, maxGen: (e.maxGen | 0) || 1,
+        extinct: (e.extinct === null || isFinite(e.extinct)) ? e.extinct : null,
+      });
+    }
+  } else {
+    for (const [kind, ko, arr] of [['herb', '초식어', herbs], ['pred', '포식자', preds], ['shrimp', '새우', shrimps], ['jelly', '해파리', jellies], ['apex', '대형 포식자', apexes]])
+      for (const f of arr) {
+        if (!f.line) continue;
+        const key = kind + ':' + f.line;
+        let e = lineBook.get(key);
+        if (!e) { e = { kind, ko, line: f.line, founded: env.day, founder: null, births: 0, maxGen: f.gen, extinct: null }; lineBook.set(key, e); }
+        if (f.gen > e.maxGen) e.maxGen = f.gen;
+      }
   }
   restoring = false;
   return { savedAt: d.savedAt };
@@ -1117,7 +1170,10 @@ function checkStory() {
     }
   if (storyState.lines !== null)
     for (const [k, v] of storyState.lines)
-      if (!cur.has(k)) addChron(v.ko + ' ' + v.line + '의 대가 끊겼다 (' + v.maxGen + '대까지 이어짐)');
+      if (!cur.has(k)) {
+        addChron(v.ko + ' ' + v.line + '의 대가 끊겼다 (' + v.maxGen + '대까지 이어짐)');
+        const _le = lineBook.get(k); if (_le && _le.extinct === null) _le.extinct = env.day;
+      }
   storyState.lines = cur;
   for (const dm of DAY_MARKS)
     if (env.day >= dm && !storyState.dayMarks.has(dm)) {
@@ -2397,9 +2453,67 @@ function drawChron() {
     ? chronicle.slice().reverse().map(c => `<div><span class="d">${c.d}일</span>${c.msg}</div>`).join('')
     : '<div style="color:#5f96b5">혈통의 정착·탄생·단절이 여기에 기록됩니다</div>';
 }
+function drawLineTree() {
+  const entries = [...lineBook.values()].sort((a, b) => a.founded - b.founded);
+  let totalBirths = 0, alive = 0;
+  for (const e of entries) { totalBirths += e.births; if (e.extinct === null) alive++; }
+  const sig = entries.length + ':' + totalBirths + ':' + alive + ':' + env.day;
+  if (_sigCache.ltree === sig) return;
+  _sigCache.ltree = sig;
+  const cv = document.getElementById('chLines');
+  const SHOW = 16;
+  const shown = entries.slice(-SHOW);
+  const laneH = 17, padT = 18, padB = 12, labelW = 62;
+  const hCss = Math.max(58, padT + shown.length * laneH + padB);
+  const [c, w, h] = fitCanvas(cv, hCss);
+  if (!shown.length) {
+    c.fillStyle = 'rgba(95,150,181,0.8)'; c.font = '11px sans-serif'; c.textAlign = 'left';
+    c.fillText('혈통이 생기면 여기에 시간의 흐름이 그려집니다', 6, 24);
+    document.getElementById('linesLeg').innerHTML = '';
+    return;
+  }
+  let d0 = shown[0].founded;
+  for (const e of shown) if (e.founded < d0) d0 = e.founded;
+  const d1 = Math.max(env.day, d0 + 1);
+  const x = d => labelW + (w - labelW - 10) * (d - d0) / (d1 - d0);
+  c.strokeStyle = 'rgba(120,190,230,0.15)'; c.lineWidth = 1;
+  c.beginPath(); c.moveTo(labelW, padT - 6); c.lineTo(w - 8, padT - 6); c.stroke();
+  c.fillStyle = 'rgba(95,150,181,0.9)'; c.font = '9px sans-serif';
+  c.textAlign = 'left'; c.fillText(d0 + '일', labelW, padT - 9);
+  c.textAlign = 'right'; c.fillText(d1 + '일 (오늘)', w - 8, padT - 9);
+  for (let i = 0; i < shown.length; i++) {
+    const e = shown[i];
+    const y = padT + i * laneH + laneH / 2;
+    const col = LINE_KIND_COLOR[e.kind] || '#8fb4c8';
+    const dead = e.extinct !== null;
+    c.fillStyle = dead ? 'rgba(143,180,200,0.55)' : '#dceef8';
+    c.font = '9.5px sans-serif'; c.textAlign = 'left';
+    c.fillText(e.line.length > 5 ? e.line.slice(0, 5) + '…' : e.line, 2, y + 3);
+    const x0 = x(e.founded), x1 = Math.max(x(dead ? e.extinct : env.day), x0 + 2);
+    c.strokeStyle = col; c.globalAlpha = dead ? 0.35 : 0.9; c.lineWidth = dead ? 2 : 3;
+    c.beginPath(); c.moveTo(x0, y); c.lineTo(x1, y); c.stroke();
+    c.globalAlpha = 1;
+    if (dead) {
+      c.fillStyle = 'rgba(240,145,138,0.85)'; c.font = '9px sans-serif'; c.textAlign = 'left';
+      c.fillText('✕', x1 + 3, y + 3);
+    } else {
+      c.fillStyle = col; c.beginPath(); c.arc(x1, y, 3, 0, TAU); c.fill();
+    }
+    c.fillStyle = dead ? 'rgba(143,180,200,0.5)' : 'rgba(220,238,248,0.75)';
+    c.font = '8.5px sans-serif'; c.textAlign = 'right';
+    c.fillText(e.maxGen + '대', x1 - 5, y - 4);
+  }
+  const more = entries.length - shown.length;
+  document.getElementById('linesLeg').innerHTML =
+    '<span><span class="dot" style="background:#dceef8"></span>살아 있는 혈통 ' + alive + '개</span>' +
+    '<span><span class="dot" style="background:rgba(240,145,138,0.85)"></span>대가 끊긴 혈통 ' + (entries.length - alive) + '개</span>' +
+    (more > 0 ? '<span>최근 ' + SHOW + '개 · 외 ' + more + '개</span>' : '');
+}
+
 function drawDash() {
   drawAch();
   drawChron();
+  drawLineTree();
   drawDex();
   drawEnvStats();
   drawEnvChart();
