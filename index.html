@@ -82,6 +82,18 @@
   #inspect .igrid { display:grid; grid-template-columns:1fr 1fr; gap:3px 12px; font-variant-numeric:tabular-nums; }
   #inspect .igrid b { color:#dceef8; font-weight:600; }
   #dashLog .d { color:#5f96b5; margin-right:6px; font-variant-numeric:tabular-nums; }
+  /* 꾸미기 팔레트 (v0.8) */
+  #decoBar {
+    display: none; position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+    background: rgba(6,18,30,0.92); border: 1px solid rgba(120,190,230,0.25); border-radius: 14px;
+    padding: 8px; gap: 6px; z-index: 30; flex-wrap: wrap; justify-content: center; max-width: 94vw;
+  }
+  #decoBar.show { display: flex; }
+  #decoBar button {
+    background: rgba(30,60,86,0.8); color: #cfe8f4; border: 1px solid rgba(120,190,230,0.3);
+    border-radius: 9px; padding: 7px 10px; font-size: 13px; cursor: pointer;
+  }
+  #decoBar button.on { background: rgba(80,150,190,0.9); color: #04121e; font-weight: 700; }
   /* 저장 모달 · 정산 카드 (v0.6) */
   #saveModal {
     position:fixed; inset:0; z-index:30; display:none; align-items:center; justify-content:center;
@@ -119,7 +131,7 @@
 <canvas id="sea"></canvas>
 <div id="hud">
   <h1>푸른 순환</h1>
-  <div class="ver">생태계 수족관 · v0.7 · <span id="cFps">--</span>fps</div>
+  <div class="ver">생태계 수족관 · v0.8 · <span id="cFps">--</span>fps</div>
   <div class="stat"><span><span class="dot" style="background:#69d67c"></span>조류</span><b id="cAlgae">0</b></div>
   <div class="stat"><span><span class="dot" style="background:#8fd3e8"></span>초식어</span><b id="cHerb">0</b></div>
   <div class="stat"><span><span class="dot" style="background:#f0918a"></span>포식자</span><b id="cPred">0</b></div>
@@ -131,6 +143,7 @@
     <button id="btnPause">일시정지</button>
     <button id="btnSpeed">1×</button>
     <button id="btnFeed">먹이</button>
+    <button id="btnDeco">꾸미기</button>
     <button id="btnDash">지표</button>
     <button id="btnSave">저장</button>
   </div>
@@ -138,6 +151,14 @@
 <div id="inspect"></div>
 <div id="settle"></div>
 <div id="saveModal"><div id="saveBox"></div></div>
+<div id="decoBar">
+  <button data-tool="rock" class="on">🪨 바위</button>
+  <button data-tool="coral">🪸 산호</button>
+  <button data-tool="plant">🌿 수초</button>
+  <button data-tool="erase">✕ 지우기</button>
+  <button id="decoTheme">🎨 배경</button>
+  <button id="decoDone">완료</button>
+</div>
 <div id="dash">
   <div id="dashHead"><span>생태계 지표</span><button id="btnDashClose">닫기</button></div>
   <div class="sec"><div class="secT">환경 상태</div><div class="gstat" id="envStats"></div></div>
@@ -153,7 +174,7 @@
 <script>
 'use strict';
 /* ============================================================
-   푸른 순환 v0.7 — 생태계 수족관 (생물 종 확장: 새우·해파리·대형 포식자)
+   푸른 순환 v0.8 — 생태계 수족관 (수족관 꾸미기: 바위·산호·수초 배치, 배경 테마, 은신처 서식지)
    생산자(조류/수초) → 초식어 → 포식자, 개체 단위 시뮬레이션
    ============================================================ */
 const canvas = document.getElementById('sea');
@@ -305,6 +326,45 @@ function makePlants() {
 }
 makePlants();
 
+/* ---------- 장식 · 배경 테마 (v0.8) ---------- */
+const DECO_MAX = { rock: 8, coral: 8, plant: 10 };
+const decorations = [];
+const THEMES = [
+  { name: '심해 블루',   bg: ['#0d3a5e', '#0a2f4d', '#072037', '#020e18'], sand: ['#27425a', '#1a2c3d', '#101c28'], ray: '150,215,255', surf: '140,215,250', mote: '170,215,240', caustic: '120,200,240' },
+  { name: '에메랄드 라군', bg: ['#0e5a54', '#0a443f', '#06302c', '#021a17'], sand: ['#2c4a42', '#1d332d', '#12211c'], ray: '170,255,225', surf: '150,240,210', mote: '185,240,215', caustic: '130,240,200' },
+  { name: '황혼 바다',   bg: ['#3a2a5e', '#2c2149', '#1d1633', '#0c0818'], sand: ['#463a56', '#302941', '#1e1929'], ray: '255,200,170', surf: '245,190,220', mote: '235,205,235', caustic: '235,170,200' },
+];
+let theme = 0;
+function addDeco(kind, x) {
+  if (kind === 'plant') {
+    if (plants.filter(p => p.user).length >= DECO_MAX.plant) { addLog('수초를 더 심을 자리가 없다'); return false; }
+    plants.push({ x: clamp(x, 14, W - 14), blades: (rand(5, 9)) | 0, h: rand(60, Math.min(160, H * 0.3)), grow: 1, ph: rand(0, TAU), spore: rand(2, 6), user: true });
+    addLog('수초를 심었다');
+    return true;
+  }
+  if (decorations.filter(d => d.kind === kind).length >= DECO_MAX[kind]) { addLog((kind === 'rock' ? '바위' : '산호') + '를 더 놓을 자리가 없다'); return false; }
+  decorations.push({ kind, x: clamp(x, 22, W - 22), y: H - 27 + rand(-3, 3), s: rand(0.8, 1.4), ph: rand(0, TAU) });
+  addLog((kind === 'rock' ? '바위' : '산호') + '를 놓았다 — 근처가 은신처가 된다');
+  return true;
+}
+function removeDecoNear(x, y) {
+  let bi = -1, bd = 1e9, isPlant = false;
+  decorations.forEach((d, i) => { const d2 = (d.x - x) ** 2 + (d.y - y) ** 2; if (d2 < bd) { bd = d2; bi = i; isPlant = false; } });
+  plants.forEach((p, i) => { if (!p.user) return; const d2 = (p.x - x) ** 2 + (H - 30 - y) ** 2; if (d2 < bd) { bd = d2; bi = i; isPlant = true; } });
+  if (bi < 0 || bd > 60 * 60) return false;
+  if (isPlant) plants.splice(bi, 1); else decorations.splice(bi, 1);
+  addLog('장식을 치웠다');
+  return true;
+}
+/* 은신처: 바위·산호 반경 60px 안의 개체는 사냥 대상에서 제외 */
+function nearCover(x, y) {
+  for (const d of decorations) {
+    const dx = d.x - x, dy = d.y - y;
+    if (dx * dx + dy * dy < 60 * 60) return true;
+  }
+  return false;
+}
+
 /* ---------- 찌꺼기 (분해 → 영양염) ---------- */
 const detritus = [];
 function dropDetritus(x, y, amt) {
@@ -419,7 +479,7 @@ let firstBreedLogged = false, firstDeathLogged = false, firstHuntLogged = false;
 
 /* ---------- 초기 개체 ---------- */
 /* ---------- 저장 · 오프라인 정산 (v0.6) ---------- */
-const SAVE_VER = 7;
+const SAVE_VER = 8;
 const SAVE_KEY = n => 'blueCycle.save.' + n;
 const SLOT_KEY = 'blueCycle.slot';
 const IS_SIM = new URLSearchParams(location.search).has('sim');
@@ -434,6 +494,9 @@ function serialize() {
     algae: algae.map(a => [Math.round(a.x), Math.round(a.y), +a.r.toFixed(1), Math.round(a.e)]),
     herbs: herbs.map(packFish), preds: preds.map(packFish),
     shrimps: shrimps.map(packFish), jellies: jellies.map(packFish), apexes: apexes.map(packFish),
+    decorations: decorations.map(d => [d.kind === 'rock' ? 0 : 1, Math.round(d.x), +d.s.toFixed(2)]),
+    uplants: plants.filter(p => p.user).map(p => [Math.round(p.x), p.blades, Math.round(p.h)]),
+    theme,
   });
 }
 function readSlot(n) {
@@ -441,9 +504,11 @@ function readSlot(n) {
     const raw = localStorage.getItem(SAVE_KEY(n));
     if (!raw) return null;
     const d = JSON.parse(raw);
-    if (!d || (d.v !== SAVE_VER && d.v !== 6) || !d.env || !Array.isArray(d.herbs) || !Array.isArray(d.preds) || !Array.isArray(d.algae)) throw new Error('shape');
+    if (!d || (d.v !== SAVE_VER && d.v !== 6 && d.v !== 7) || !d.env || !Array.isArray(d.herbs) || !Array.isArray(d.preds) || !Array.isArray(d.algae)) throw new Error('shape');
     /* v6 → v7 마이그레이션: 새 종 배열이 없으면 빈 배열로 (기존 저장 슬롯 보존) */
-    if (d.v === 6) { d.v = SAVE_VER; d.shrimps = d.shrimps || []; d.jellies = d.jellies || []; d.apexes = d.apexes || []; }
+    if (d.v === 6) { d.v = 7; d.shrimps = d.shrimps || []; d.jellies = d.jellies || []; d.apexes = d.apexes || []; }
+    /* v7 → v8 마이그레이션: 장식·테마 기본값 */
+    if (d.v === 7) { d.v = SAVE_VER; d.decorations = d.decorations || []; d.uplants = d.uplants || []; d.theme = d.theme || 0; }
     return d;
   } catch {
     /* 손상 데이터는 격리하고 슬롯을 비움 — 절대 깨진 상태로 시작하지 않음 */
@@ -508,6 +573,16 @@ function initWorld(d) {
   unpackNew(d.shrimps, 'shrimp', SHRIMP_MAX, spawnShrimp);
   unpackNew(d.jellies, 'jelly', JELLY_MAX, spawnJelly);
   unpackNew(d.apexes, 'apex', APEX_MAX, spawnApex);
+  /* 장식·사용자 수초·테마 복원 (v0.8) */
+  for (const a of (d.decorations || [])) {
+    if (!Array.isArray(a) || !isFinite(a[1])) continue;
+    decorations.push({ kind: a[0] === 0 ? 'rock' : 'coral', x: clamp(a[1], 22, W - 22), y: H - 27, s: clamp(a[2] || 1, 0.5, 2), ph: rand(0, TAU) });
+  }
+  for (const a of (d.uplants || [])) {
+    if (!Array.isArray(a) || !isFinite(a[0])) continue;
+    plants.push({ x: clamp(a[0], 14, W - 14), blades: clamp(a[1] | 0 || 6, 3, 10), h: clamp(a[2] || 100, 30, H * 0.4), grow: 1, ph: rand(0, TAU), spore: rand(2, 6), user: true });
+  }
+  theme = clamp(d.theme | 0, 0, THEMES.length - 1);
   restoring = false;
   return { savedAt: d.savedAt };
 }
@@ -588,9 +663,41 @@ function renderInspect() {
   inspectEl.classList.add('show');
   document.getElementById('inspectX').addEventListener('click', ev => { ev.stopPropagation(); hideInspect(); });
 }
+/* ---------- 꾸미기 모드 (v0.8) ---------- */
+let decoMode = false, decoTool = 'rock';
+const decoBar = document.getElementById('decoBar');
+const btnDeco = document.getElementById('btnDeco');
+btnDeco.addEventListener('click', () => {
+  decoMode = !decoMode;
+  decoBar.classList.toggle('show', decoMode);
+  btnDeco.classList.toggle('on', decoMode);
+  if (decoMode) { hideInspect(); addLog('꾸미기 모드 — 바닥을 터치해 배치하세요'); }
+});
+for (const b of decoBar.querySelectorAll('[data-tool]')) {
+  b.addEventListener('click', () => {
+    decoTool = b.dataset.tool;
+    for (const o of decoBar.querySelectorAll('[data-tool]')) o.classList.toggle('on', o === b);
+  });
+}
+document.getElementById('decoTheme').addEventListener('click', () => {
+  theme = (theme + 1) % THEMES.length;
+  addLog('배경 테마: ' + THEMES[theme].name);
+});
+document.getElementById('decoDone').addEventListener('click', () => {
+  decoMode = false;
+  decoBar.classList.remove('show');
+  btnDeco.classList.remove('on');
+});
 canvas.addEventListener('pointerdown', e => {
   const r = canvas.getBoundingClientRect();
   const tx = e.clientX - r.left, ty = e.clientY - r.top;
+  if (decoMode) {
+    hideInspect();
+    if (decoTool === 'erase') { removeDecoNear(tx, ty); return; }
+    if (ty < H * 0.55) { addLog('장식은 바닥 가까이에 놓아 주세요'); return; }
+    addDeco(decoTool, tx);
+    return;
+  }
   let best = null, bd = 1e9;
   for (const arr of [herbs, preds, shrimps, jellies, apexes]) for (const f of arr) { const dx = f.x - tx, dy = f.y - ty, d2 = dx * dx + dy * dy; if (d2 < bd) { bd = d2; best = f; } }
   if (best && bd < 44 * 44) { selFish = best; renderInspect(); return; }
@@ -785,6 +892,7 @@ function step(dt) {
     if (f.energy < huntDrive) {
       herbGrid.near(f.x, f.y, 240, _near);
       for (const h of _near) {
+        if (nearCover(h.x, h.y)) continue; /* 은신처에 숨은 개체는 노리지 않음 (v0.8) */
         const dx = h.x - f.x, dy = h.y - f.y, d2 = dx * dx + dy * dy;
         if (d2 < bd) { bd = d2; best = h; }
       }
@@ -976,6 +1084,7 @@ function step(dt) {
     if (f.energy < 80 && f.cool <= 0) {
       const consider = (arr, r, gv) => {
         for (const p of arr) {
+          if (nearCover(p.x, p.y)) continue; /* 은신처 (v0.8) */
           const dx = p.x - f.x, dy = p.y - f.y, d2 = dx * dx + dy * dy;
           if (d2 < bd && d2 < r * r) { bd = d2; best = p; gain = gv; preyArr = arr; }
         }
@@ -1096,11 +1205,12 @@ const motes = [];
 for (let i = 0; i < 70; i++) motes.push({ x: Math.random(), y: Math.random(), r: rand(0.5, 1.6), ph: rand(0, TAU), sp: rand(0.5, 2) });
 
 function drawBackground(t) {
+  const TH = THEMES[theme];
   const grd = ctx.createLinearGradient(0, 0, 0, H);
-  grd.addColorStop(0, '#0d3a5e');
-  grd.addColorStop(0.4, '#0a2f4d');
-  grd.addColorStop(0.75, '#072037');
-  grd.addColorStop(1, '#020e18');
+  grd.addColorStop(0, TH.bg[0]);
+  grd.addColorStop(0.4, TH.bg[1]);
+  grd.addColorStop(0.75, TH.bg[2]);
+  grd.addColorStop(1, TH.bg[3]);
   ctx.fillStyle = grd;
   ctx.fillRect(0, 0, W, H);
 
@@ -1112,9 +1222,9 @@ function drawBackground(t) {
     const bx = W * (0.08 + i * 0.21) + drift;
     const flick = (0.6 + 0.4 * Math.sin(t * 0.5 + i * 2.2)) * (0.12 + env.light * 0.88);
     const g2 = ctx.createLinearGradient(bx, 0, bx + 100, H * 0.9);
-    g2.addColorStop(0, `rgba(150,215,255,${0.10 * flick})`);
-    g2.addColorStop(0.6, `rgba(140,205,250,${0.035 * flick})`);
-    g2.addColorStop(1, 'rgba(140,205,250,0)');
+    g2.addColorStop(0, `rgba(${TH.ray},${0.10 * flick})`);
+    g2.addColorStop(0.6, `rgba(${TH.ray},${0.035 * flick})`);
+    g2.addColorStop(1, `rgba(${TH.ray},0)`);
     ctx.fillStyle = g2;
     ctx.beginPath();
     ctx.moveTo(bx - 22, 0); ctx.lineTo(bx + 22, 0);
@@ -1128,7 +1238,7 @@ function drawBackground(t) {
     const my = ((m.y * H + t * m.sp * 3) % H);
     const tw = 0.25 + 0.55 * (0.5 + 0.5 * Math.sin(t * 1.3 + m.ph));
     const depth = my / H;
-    ctx.fillStyle = `rgba(170,215,240,${tw * (1 - depth * 0.55)})`;
+    ctx.fillStyle = `rgba(${TH.mote},${tw * (1 - depth * 0.55)})`;
     ctx.beginPath();
     ctx.arc((m.x * W + Math.sin(t * 0.3 + m.ph) * 12), my, m.r, 0, TAU);
     ctx.fill();
@@ -1136,7 +1246,7 @@ function drawBackground(t) {
 
   /* 바닥 */
   const sand = ctx.createLinearGradient(0, H - 60, 0, H);
-  sand.addColorStop(0, '#27425a'); sand.addColorStop(0.5, '#1a2c3d'); sand.addColorStop(1, '#101c28');
+  sand.addColorStop(0, TH.sand[0]); sand.addColorStop(0.5, TH.sand[1]); sand.addColorStop(1, TH.sand[2]);
   ctx.fillStyle = sand;
   ctx.beginPath();
   ctx.moveTo(0, H - 30);
@@ -1151,8 +1261,8 @@ function drawBackground(t) {
     const cy = H - 18 - Math.abs(Math.sin(t * 0.28 + i)) * 14;
     const rr = 26 + Math.sin(t * 0.5 + i * 1.3) * 9;
     const cg = ctx.createRadialGradient(cx, cy, 0, cx, cy, rr);
-    cg.addColorStop(0, 'rgba(120,200,240,0.10)');
-    cg.addColorStop(1, 'rgba(120,200,240,0)');
+    cg.addColorStop(0, `rgba(${TH.caustic},0.10)`);
+    cg.addColorStop(1, `rgba(${TH.caustic},0)`);
     ctx.fillStyle = cg;
     ctx.beginPath(); ctx.arc(cx, cy, rr, 0, TAU); ctx.fill();
   }
@@ -1160,8 +1270,8 @@ function drawBackground(t) {
 
   /* 수면 — 파도 밴드 + 반짝임 */
   const surf = ctx.createLinearGradient(0, 0, 0, 34);
-  surf.addColorStop(0, 'rgba(140,215,250,0.28)');
-  surf.addColorStop(1, 'rgba(140,215,250,0)');
+  surf.addColorStop(0, `rgba(${TH.surf},0.28)`);
+  surf.addColorStop(1, `rgba(${TH.surf},0)`);
   ctx.fillStyle = surf;
   ctx.beginPath();
   ctx.moveTo(0, 0); ctx.lineTo(W, 0); ctx.lineTo(W, 10);
@@ -1216,6 +1326,45 @@ function drawPlants(t) {
   }
 }
 
+function drawDecorations(t) {
+  for (const d of decorations) {
+    const s = d.s;
+    if (d.kind === 'rock') {
+      /* 바위: 겹친 회갈색 덩어리 */
+      for (let i = 0; i < 3; i++) {
+        const rx = d.x + Math.cos(d.ph + i * 2.1) * 9 * s;
+        const ry = d.y - 4 - Math.abs(Math.sin(d.ph + i * 1.4)) * 7 * s;
+        const rr = (13 - i * 3) * s;
+        const g = ctx.createLinearGradient(rx, ry - rr, rx, ry + rr);
+        g.addColorStop(0, '#5a6a74'); g.addColorStop(0.6, '#3d4a52'); g.addColorStop(1, '#242e34');
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.ellipse(rx, ry, rr, rr * 0.78, 0, 0, TAU); ctx.fill();
+      }
+      /* 윗면 하이라이트 */
+      ctx.fillStyle = 'rgba(190,215,225,0.18)';
+      ctx.beginPath(); ctx.ellipse(d.x - 3 * s, d.y - 12 * s, 8 * s, 4 * s, -0.3, 0, TAU); ctx.fill();
+    } else {
+      /* 산호: 갈라지는 가지 — ph로 결정적 생성 */
+      const hue = 340 + (d.ph / TAU) * 30; /* 분홍~주황 */
+      const branches = (t2, bx, by, ang, len, w, depth) => {
+        if (depth <= 0 || len < 3) return;
+        const ex = bx + Math.cos(ang) * len, ey = by + Math.sin(ang) * len;
+        ctx.strokeStyle = `hsla(${hue},62%,${52 + depth * 6}%,0.92)`;
+        ctx.lineWidth = w; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(ex, ey); ctx.stroke();
+        ctx.fillStyle = `hsla(${hue},70%,68%,0.95)`;
+        ctx.beginPath(); ctx.arc(ex, ey, w * 0.7, 0, TAU); ctx.fill();
+        const n = depth === 3 ? 3 : 2;
+        for (let k = 0; k < n; k++) {
+          const spread = Math.sin(d.ph * 7 + t2 * 13 + k * 5) * 0.55;
+          branches(t2 + 1 + k, ex, ey, ang + spread + (k - (n - 1) / 2) * 0.5, len * 0.68, w * 0.72, depth - 1);
+        }
+      };
+      const sway = Math.sin(t * 0.7 + d.ph) * 0.04;
+      branches(0, d.x, d.y + 4, -Math.PI / 2 + sway, 26 * s, 4.5 * s, 3);
+    }
+  }
+}
 function drawAlgae(t) {
   for (const a of algae) {
     const depth = clamp(a.y / H, 0, 1);
@@ -1721,6 +1870,7 @@ function frame(now) {
   const t = env.t;
   drawBackground(t);
   drawPlants(t);
+  drawDecorations(t);
   drawAlgae(t);
   drawDetritus();
   for (const f of shrimps) drawShrimp(f, t);
@@ -1771,6 +1921,10 @@ if (simQ) {
   const total = Math.min(parseInt(simQ, 10) || 0, 3600);
   let extTotal = 0; const _addLog = addLog;
   addLog = function (m) { if (m.indexOf('사라졌다') >= 0) extTotal++; _addLog(m); };
+  if (new URLSearchParams(location.search).get('deco')) {
+    for (let i = 0; i < 8; i++) { addDeco('rock', 30 + i * 46); addDeco('coral', 48 + i * 46); }
+    for (let i = 0; i < 10; i++) addDeco('plant', 24 + i * 38);
+  }
   const rec = { seconds: total, min: { a: 1e9, h: 1e9, p: 1e9, s: 1e9, j: 1e9, x: 1e9 }, max: { a: 0, h: 0, p: 0, s: 0, j: 0, x: 0 }, events: [], oxyMin: 1, tempMin: 99, tempMax: -99 };
   let evAcc = 0;
   for (let i = 0; i < total * 10; i++) {
