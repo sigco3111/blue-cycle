@@ -82,6 +82,25 @@
   #inspect .igrid { display:grid; grid-template-columns:1fr 1fr; gap:3px 12px; font-variant-numeric:tabular-nums; }
   #inspect .igrid b { color:#dceef8; font-weight:600; }
   #dashLog .d { color:#5f96b5; margin-right:6px; font-variant-numeric:tabular-nums; }
+  /* 도전 과제 (v1.0) */
+  #achGrid { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  #achGrid .a { background:rgba(10,35,55,.4); border:1px solid transparent; border-radius:8px; padding:6px 8px; font-size:11px; color:#8fb4c8; }
+  #achGrid .a .nm { color:#dceef8; font-weight:600; }
+  #achGrid .a.done { border-color:rgba(240,205,110,.45); background:rgba(60,48,16,.3); color:#cbb98a; }
+  #achGrid .a.done .nm { color:#f2d98a; }
+  #achGrid .a.lock { opacity:.55; }
+  #toasts { position:fixed; left:50%; bottom:64px; transform:translateX(-50%); z-index:35; pointer-events:none; display:flex; flex-direction:column; align-items:center; gap:8px; }
+  .toast {
+    background:rgba(24,20,8,.92); border:1px solid rgba(240,205,110,.55); color:#f2d98a;
+    border-radius:12px; padding:9px 16px; font-size:13px; text-align:center; max-width:86vw;
+    box-shadow:0 4px 18px rgba(0,0,0,.5);
+    animation:toastIn .45s ease-out, toastOut .6s ease-in forwards;
+    animation-delay:0s, 3.8s;
+  }
+  .toast b { display:block; font-size:14px; margin-bottom:2px; }
+  .toast span { color:#cbb98a; font-size:11.5px; }
+  @keyframes toastIn { from { opacity:0; transform:translateY(16px) scale(.92); } to { opacity:1; transform:none; } }
+  @keyframes toastOut { to { opacity:0; transform:translateY(-10px); } }
   /* 사운드 행 (v0.9) */
   #sndRow { margin-top:6px; display:flex; gap:6px; align-items:center; }
   #sndRow #btnSnd {
@@ -139,7 +158,7 @@
 <canvas id="sea"></canvas>
 <div id="hud">
   <h1>푸른 순환</h1>
-  <div class="ver">생태계 수족관 · v0.9 · <span id="cFps">--</span>fps</div>
+  <div class="ver">생태계 수족관 · v1.0 · <span id="cFps">--</span>fps</div>
   <div class="stat"><span><span class="dot" style="background:#69d67c"></span>조류</span><b id="cAlgae">0</b></div>
   <div class="stat"><span><span class="dot" style="background:#8fd3e8"></span>초식어</span><b id="cHerb">0</b></div>
   <div class="stat"><span><span class="dot" style="background:#f0918a"></span>포식자</span><b id="cPred">0</b></div>
@@ -178,15 +197,17 @@
   <div class="sec"><div class="secT">개체수 추이 · 최근 5분</div><canvas id="chLine" class="chart" height="132"></canvas><div class="leg" id="lineLeg"></div></div>
   <div class="sec"><div class="secT">생물량 비중</div><canvas id="chPie" class="chart" height="150"></canvas><div class="leg" id="pieLeg"></div></div>
   <div class="sec"><div class="secT">세대 · 기록</div><div class="gstat" id="genStats"></div></div>
+  <div class="sec"><div class="secT">도전 과제 <span id="achCount" style="color:#dceef8"></span></div><div id="achGrid"></div></div>
   <div class="sec"><div class="secT">도감 · 발견한 형태 <span id="dexCount" style="color:#dceef8"></span></div><div id="dexGrid"></div></div>
   <div class="sec"><div class="secT">관찰 일지</div><div id="dashLog"></div></div>
 </div>
 <div id="log"></div>
+<div id="toasts"></div>
 <div id="hint">방치해도 생태계가 저절로 돌아갑니다</div>
 <script>
 'use strict';
 /* ============================================================
-   푸른 순환 v0.9 — 생태계 수족관 (사운드·앰비언스: WebAudio 절차 생성 물소리·낮밤 배경음·효과음)
+   푸른 순환 v1.0 — 생태계 수족관 (도전 과제: 업적·달성 연출·대시보드 패널)
    생산자(조류/수초) → 초식어 → 포식자, 개체 단위 시뮬레이션
    ============================================================ */
 const canvas = document.getElementById('sea');
@@ -301,7 +322,7 @@ function recordMorph(kind, g) {
   const e = codex.get(m.key);
   if (e) { e.seen++; return e; }
   codex.set(m.key, { ...m, kind, firstDay: env.day, seen: 1 });
-  if (m.rarity >= 2) { addLog((m.rarity === 3 ? '전설의' : '희귀한') + ' 변이 발견: ' + m.name); sfx(m.rarity === 3 ? 'legend' : 'rare'); }
+  if (m.rarity >= 2) { addLog((m.rarity === 3 ? '전설의' : '희귀한') + ' 변이 발견: ' + m.name); sfx(m.rarity === 3 ? 'legend' : 'rare'); if (m.rarity === 3) stats.legendFound = (stats.legendFound || 0) + 1; else stats.rareFound = (stats.rareFound || 0) + 1; }
   return codex.get(m.key);
 }
 
@@ -352,11 +373,13 @@ function addDeco(kind, x) {
     if (plants.filter(p => p.user).length >= DECO_MAX.plant) { addLog('수초를 더 심을 자리가 없다'); return false; }
     plants.push({ x: clamp(x, 14, W - 14), blades: (rand(5, 9)) | 0, h: rand(60, Math.min(160, H * 0.3)), grow: 1, ph: rand(0, TAU), spore: rand(2, 6), user: true });
     addLog('수초를 심었다');
+    stats.decoPlaced = (stats.decoPlaced || 0) + 1;
     return true;
   }
   if (decorations.filter(d => d.kind === kind).length >= DECO_MAX[kind]) { addLog((kind === 'rock' ? '바위' : '산호') + '를 더 놓을 자리가 없다'); return false; }
   decorations.push({ kind, x: clamp(x, 22, W - 22), y: H - 27 + rand(-3, 3), s: rand(0.8, 1.4), ph: rand(0, TAU) });
   addLog((kind === 'rock' ? '바위' : '산호') + '를 놓았다 — 근처가 은신처가 된다');
+  stats.decoPlaced = (stats.decoPlaced || 0) + 1;
   return true;
 }
 function removeDecoNear(x, y) {
@@ -499,7 +522,7 @@ let firstBreedLogged = false, firstDeathLogged = false, firstHuntLogged = false;
 
 /* ---------- 초기 개체 ---------- */
 /* ---------- 저장 · 오프라인 정산 (v0.6) ---------- */
-const SAVE_VER = 8;
+const SAVE_VER = 9;
 const SAVE_KEY = n => 'blueCycle.save.' + n;
 const SLOT_KEY = 'blueCycle.slot';
 const IS_SIM = new URLSearchParams(location.search).has('sim');
@@ -517,6 +540,7 @@ function serialize() {
     decorations: decorations.map(d => [d.kind === 'rock' ? 0 : 1, Math.round(d.x), +d.s.toFixed(2)]),
     uplants: plants.filter(p => p.user).map(p => [Math.round(p.x), p.blades, Math.round(p.h)]),
     theme,
+    ach: Object.entries(ach),
   });
 }
 function readSlot(n) {
@@ -524,11 +548,13 @@ function readSlot(n) {
     const raw = localStorage.getItem(SAVE_KEY(n));
     if (!raw) return null;
     const d = JSON.parse(raw);
-    if (!d || (d.v !== SAVE_VER && d.v !== 6 && d.v !== 7) || !d.env || !Array.isArray(d.herbs) || !Array.isArray(d.preds) || !Array.isArray(d.algae)) throw new Error('shape');
+    if (!d || (d.v !== SAVE_VER && d.v !== 6 && d.v !== 7 && d.v !== 8) || !d.env || !Array.isArray(d.herbs) || !Array.isArray(d.preds) || !Array.isArray(d.algae)) throw new Error('shape');
     /* v6 → v7 마이그레이션: 새 종 배열이 없으면 빈 배열로 (기존 저장 슬롯 보존) */
     if (d.v === 6) { d.v = 7; d.shrimps = d.shrimps || []; d.jellies = d.jellies || []; d.apexes = d.apexes || []; }
     /* v7 → v8 마이그레이션: 장식·테마 기본값 */
-    if (d.v === 7) { d.v = SAVE_VER; d.decorations = d.decorations || []; d.uplants = d.uplants || []; d.theme = d.theme || 0; }
+    if (d.v === 7) { d.v = 8; d.decorations = d.decorations || []; d.uplants = d.uplants || []; d.theme = d.theme || 0; }
+    /* v8 → v9 마이그레이션: 업적 기본값 */
+    if (d.v === 8) { d.v = SAVE_VER; d.ach = d.ach || []; }
     return d;
   } catch {
     /* 손상 데이터는 격리하고 슬롯을 비움 — 절대 깨진 상태로 시작하지 않음 */
@@ -603,6 +629,7 @@ function initWorld(d) {
     plants.push({ x: clamp(a[0], 14, W - 14), blades: clamp(a[1] | 0 || 6, 3, 10), h: clamp(a[2] || 100, 30, H * 0.4), grow: 1, ph: rand(0, TAU), spore: rand(2, 6), user: true });
   }
   theme = clamp(d.theme | 0, 0, THEMES.length - 1);
+  for (const kv of (d.ach || [])) if (Array.isArray(kv) && typeof kv[0] === 'string') ach[kv[0]] = kv[1] | 0;
   restoring = false;
   return { savedAt: d.savedAt };
 }
@@ -819,6 +846,18 @@ function sfx(kind) {
       o.connect(g); g.connect(masterGain);
       o.start(t1); o.stop(t1 + 0.65);
     });
+  } else if (kind === 'achieve') {
+    /* 업적: 금속성 팡파르 */
+    [587, 740, 880].forEach((fq, i) => {
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = 'triangle'; o.frequency.value = fq;
+      const t1 = t0 + i * 0.09;
+      g.gain.setValueAtTime(0.0001, t1);
+      g.gain.exponentialRampToValueAtTime(0.09, t1 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t1 + 0.5);
+      o.connect(g); g.connect(masterGain);
+      o.start(t1); o.stop(t1 + 0.55);
+    });
   } else if (kind === 'splash') {
     /* 먹이: 짧은 첨벙 */
     const src = actx.createBufferSource(); src.buffer = noiseBuf;
@@ -857,6 +896,56 @@ volRange.addEventListener('input', () => {
 document.addEventListener('pointerdown', initAudio, { once: false });
 document.addEventListener('visibilitychange', () => { if (actx && !document.hidden && actx.state === 'suspended') actx.resume(); });
 window.__snd = () => ({ state: actx ? actx.state : 'none', muted: sndPref.muted, vol: sndPref.vol });
+
+/* ---------- 도전 과제 (v1.0) — 엔딩 없는 방치형: 기록은 수집될 뿐 ---------- */
+const ACHIEVEMENTS = [
+  { id: 'breed1',  name: '생명의 순환',   desc: '2세대 탄생을 지켜봤다', check: () => stats.births >= 1 },
+  { id: 'hunt1',   name: '먹이사슬의 증인', desc: '사냥 성공을 목격했다', check: () => stats.hunts >= 1 },
+  { id: 'week',    name: '일주일의 수족관', desc: '7일 생존',           check: () => env.day >= 7 },
+  { id: 'month',   name: '한 달의 수족관',  desc: '30일 생존',          check: () => env.day >= 30 },
+  { id: 'hundred', name: '백일장',        desc: '100일 생존',          check: () => env.day >= 100 },
+  { id: 'rare',    name: '눈부신 발견',    desc: '희귀 변이를 발견했다',  check: () => (stats.rareFound || 0) >= 1 },
+  { id: 'legend',  name: '전설 수집가',    desc: '전설 변이를 발견했다',  check: () => (stats.legendFound || 0) >= 1 },
+  { id: 'codex25', name: '도감 25종',     desc: '형태 25종을 기록했다',  check: () => codex.size >= 25 },
+  { id: 'codex50', name: '도감 50종',     desc: '형태 50종을 기록했다',  check: () => codex.size >= 50 },
+  { id: 'codex100',name: '도감 100종',    desc: '형태 100종을 기록했다', check: () => codex.size >= 100 },
+  { id: 'six',     name: '여섯 생명의 공존', desc: '조류·초식어·포식자·새우·해파리·대형이 함께 살았다', check: () => algae.length > 0 && herbs.length > 0 && preds.length > 0 && shrimps.length > 0 && jellies.length > 0 && apexes.length > 0 },
+  { id: 'deco1',   name: '첫 손길',       desc: '장식을 처음 놓았다',    check: () => (stats.decoPlaced || 0) >= 1 },
+  { id: 'deco10',  name: '수족관 디자이너', desc: '장식 10개를 배치했다', check: () => (stats.decoPlaced || 0) >= 10 },
+  { id: 'gen10',   name: '대를 잇는 생명',  desc: '10세대 도달',        check: () => Math.max(stats.maxGenHerb || 1, stats.maxGenPred || 1, stats.maxGenShrimp || 1, stats.maxGenJelly || 1, stats.maxGenApex || 1) >= 10 },
+  { id: 'bloom',   name: '초록 파도',      desc: '조류 대발생을 겪었다',  check: () => (stats.bloomsSeen || 0) >= 1 },
+  { id: 'recover', name: '다시 찾아온 생명', desc: '멸종 후 회복을 지켜봤다', check: () => (stats.recoveries || 0) >= 1 },
+];
+const ach = {}; /* id → 달성 일자 */
+let achQuiet = true; /* 로드 직후 첫 평가는 이미 이룬 기록이므로 조용히 반영 */
+function checkAchievements() {
+  let changed = false;
+  for (const a of ACHIEVEMENTS) {
+    if (ach[a.id] !== undefined) continue;
+    let ok = false;
+    try { ok = a.check(); } catch (e) {}
+    if (!ok) continue;
+    ach[a.id] = env.day;
+    changed = true;
+    if (!achQuiet) {
+      addLog('🏅 업적 달성 — ' + a.name);
+      toast(a);
+      sfx('achieve');
+    }
+  }
+  if (changed && dashOpen) drawAch();
+  achQuiet = false;
+}
+function toast(a) {
+  const box = document.getElementById('toasts');
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.innerHTML = '<b>🏅 ' + a.name + '</b><span>' + a.desc + '</span>';
+  box.appendChild(el);
+  setTimeout(() => el.remove(), 4600);
+  while (box.children.length > 3) box.firstChild.remove();
+}
+setInterval(checkAchievements, 1000);
 
 /* ---------- 일시정지/속도 ---------- */
 let paused = false, speed = 1;
@@ -922,6 +1011,7 @@ function step(dt) {
   } else if (env.bloomCd <= 0 && env.nutrients > 0.5 && env.light > 0.7 && algae.length > 60 && Math.random() < dt * 0.012) {
     env.bloom = 13;
     addLog('조류가 대발생하기 시작했다');
+    stats.bloomsSeen = (stats.bloomsSeen || 0) + 1;
   }
 
   /* --- 조류 이동 --- */
@@ -1318,6 +1408,7 @@ function step(dt) {
           spawnHerb(); spawnHerb(); spawnHerb();
           env.herbGone = false;
           addLog('어디선가 초식어 무리가 흘러들었다');
+          stats.recoveries = (stats.recoveries || 0) + 1;
         }
       }
     }
@@ -1327,22 +1418,23 @@ function step(dt) {
     if (env.predRescue < 0 && herbs.length > 12) env.predRescue = 20;
     if (env.predRescue >= 0) {
       env.predRescue -= dt;
-      if (env.predRescue < 0) { spawnPred(); env.predGone = false; addLog('어디선가 포식자가 흘러들었다'); }
+      if (env.predRescue < 0) { spawnPred(); env.predGone = false; addLog('어디선가 포식자가 흘러들었다'); stats.recoveries = (stats.recoveries || 0) + 1; }
     }
   } else { env.predGone = false; env.predRescue = -1; }
   /* 새우·해파리·대형 포식자 회복 (v0.7) */
   if (shrimps.length === 0 && detritus.length + algae.length > 40) {
     if (!env.shrimpGone) { env.shrimpGone = true; }
-    if (Math.random() < dt * 0.05) { spawnShrimp(); spawnShrimp(); env.shrimpGone = false; addLog('바닥에서 새우 한 쌍이 기어 나왔다'); }
+    if (Math.random() < dt * 0.05) { spawnShrimp(); spawnShrimp(); env.shrimpGone = false; addLog('바닥에서 새우 한 쌍이 기어 나왔다'); stats.recoveries = (stats.recoveries || 0) + 1; }
   }
   if (jellies.length === 0 && Math.random() < dt * 0.02) {
     spawnJelly();
     addLog('해파리가 물결을 타고 흘러들었다');
+    stats.recoveries = (stats.recoveries || 0) + 1;
   }
   if (apexes.length === 0 && preds.length >= 3) {
     if (env.apexRescue === undefined || env.apexRescue < 0) env.apexRescue = 60;
     env.apexRescue -= dt;
-    if (env.apexRescue < 0) { spawnApex(); addLog('그림자 같은 대형 포식자가 나타났다'); }
+    if (env.apexRescue < 0) { spawnApex(); addLog('그림자 같은 대형 포식자가 나타났다'); stats.recoveries = (stats.recoveries || 0) + 1; }
   } else if (apexes.length > 0) env.apexRescue = -1;
 }
 
@@ -1933,7 +2025,18 @@ function drawEnvChart() {
   document.getElementById('envLeg').innerHTML = ENV_SERIES.map(s =>
     `<span><span class="dot" style="background:${s.color}"></span>${s.name} ${hist[s.key].length ? hist[s.key][hist[s.key].length - 1] : 0}</span>`).join('');
 }
+function drawAch() {
+  const done = ACHIEVEMENTS.filter(a => ach[a.id] !== undefined).length;
+  document.getElementById('achCount').textContent = done + ' / ' + ACHIEVEMENTS.length;
+  document.getElementById('achGrid').innerHTML = ACHIEVEMENTS.map(a => {
+    const d = ach[a.id];
+    return d !== undefined
+      ? `<div class="a done"><span class="nm">🏅 ${a.name}</span><br>${a.desc} · ${d}일 달성</div>`
+      : `<div class="a lock"><span class="nm">🔒 ${a.name}</span><br>${a.desc}</div>`;
+  }).join('');
+}
 function drawDash() {
+  drawAch();
   drawDex();
   drawEnvStats();
   drawEnvChart();
