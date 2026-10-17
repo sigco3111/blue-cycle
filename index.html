@@ -1331,12 +1331,14 @@ function renderSaveBox() {
     renderSaveBox();
   });
   for (const b of saveBoxEl.querySelectorAll('[data-load]')) b.addEventListener('click', () => {
+    suppressExitSave = true; /* 나가며 저장이 불러올 슬롯을 덮어쓰지 않게 */
     try { localStorage.setItem(SLOT_KEY, b.dataset.load); } catch {}
     location.reload();
   });
   let newArmed = false;
   document.getElementById('btnNewTank').addEventListener('click', ev => {
     if (!newArmed) { newArmed = true; ev.target.textContent = '정말 초기화 — 한 번 더'; return; }
+    suppressExitSave = true;
     try { localStorage.removeItem(SAVE_KEY(activeSlot())); } catch {}
     location.reload();
   });
@@ -1348,10 +1350,11 @@ document.getElementById('btnSave').addEventListener('click', () => {
 });
 saveModalEl.addEventListener('click', e => { if (e.target === saveModalEl) saveModalEl.classList.remove('show'); });
 
-/* 자동 저장: 15초 간격 + 페이지를 떠날 때 */
+/* 자동 저장: 15초 간격 + 페이지를 떠날 때 (슬롯 전환·초기화 직후에는 나가며 저장하지 않음) */
+let suppressExitSave = false;
 if (!IS_SIM) {
-  setInterval(() => { try { localStorage.setItem(SAVE_KEY(activeSlot()), serialize()); } catch {} }, 15000);
-  window.addEventListener('pagehide', () => { try { localStorage.setItem(SAVE_KEY(activeSlot()), serialize()); } catch {} });
+  setInterval(() => { if (!suppressExitSave) try { localStorage.setItem(SAVE_KEY(activeSlot()), serialize()); } catch {} }, 15000);
+  window.addEventListener('pagehide', () => { if (!suppressExitSave) try { localStorage.setItem(SAVE_KEY(activeSlot()), serialize()); } catch {} });
 }
 
 /* ---------- 메인 루프 ---------- */
