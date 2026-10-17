@@ -886,10 +886,14 @@ const SERIES = [
 function fitCanvas(cv, hCss) {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const w = cv.clientWidth || (window.innerWidth - 32);
-  cv.width = w * dpr; cv.height = hCss * dpr;
-  cv.style.height = hCss + 'px';
+  /* 크기가 같으면 백링 스토어 재할당을 건너뛰고 지우기만 (소프트웨어 렌더링 비용 절감) */
+  if (cv.width !== w * dpr || cv.height !== hCss * dpr) {
+    cv.width = w * dpr; cv.height = hCss * dpr;
+    cv.style.height = hCss + 'px';
+  }
   const c = cv.getContext('2d');
   c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.clearRect(0, 0, w, hCss);
   return [c, w, hCss];
 }
 
