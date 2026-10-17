@@ -82,6 +82,14 @@
   #inspect .igrid { display:grid; grid-template-columns:1fr 1fr; gap:3px 12px; font-variant-numeric:tabular-nums; }
   #inspect .igrid b { color:#dceef8; font-weight:600; }
   #dashLog .d { color:#5f96b5; margin-right:6px; font-variant-numeric:tabular-nums; }
+  /* 사운드 행 (v0.9) */
+  #sndRow { margin-top:6px; display:flex; gap:6px; align-items:center; }
+  #sndRow #btnSnd {
+    background:rgba(80,170,220,.16); color:#bfe4f7; border:1px solid rgba(120,200,255,.25);
+    border-radius:8px; padding:3px 8px; font-size:12px; cursor:pointer; font-family:inherit;
+  }
+  #sndRow #btnSnd.off { opacity:.5; }
+  #sndRow input[type=range] { flex:1; height:3px; accent-color:#6fc3e8; cursor:pointer; }
   /* 꾸미기 팔레트 (v0.8) */
   #decoBar {
     display: none; position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
@@ -131,7 +139,7 @@
 <canvas id="sea"></canvas>
 <div id="hud">
   <h1>푸른 순환</h1>
-  <div class="ver">생태계 수족관 · v0.8 · <span id="cFps">--</span>fps</div>
+  <div class="ver">생태계 수족관 · v0.9 · <span id="cFps">--</span>fps</div>
   <div class="stat"><span><span class="dot" style="background:#69d67c"></span>조류</span><b id="cAlgae">0</b></div>
   <div class="stat"><span><span class="dot" style="background:#8fd3e8"></span>초식어</span><b id="cHerb">0</b></div>
   <div class="stat"><span><span class="dot" style="background:#f0918a"></span>포식자</span><b id="cPred">0</b></div>
@@ -146,6 +154,10 @@
     <button id="btnDeco">꾸미기</button>
     <button id="btnDash">지표</button>
     <button id="btnSave">저장</button>
+  </div>
+  <div id="sndRow">
+    <button id="btnSnd" title="소리 켜기/끄기">🔊</button>
+    <input id="volRange" type="range" min="0" max="100" value="50" aria-label="음량">
   </div>
 </div>
 <div id="inspect"></div>
@@ -174,7 +186,7 @@
 <script>
 'use strict';
 /* ============================================================
-   푸른 순환 v0.8 — 생태계 수족관 (수족관 꾸미기: 바위·산호·수초 배치, 배경 테마, 은신처 서식지)
+   푸른 순환 v0.9 — 생태계 수족관 (사운드·앰비언스: WebAudio 절차 생성 물소리·낮밤 배경음·효과음)
    생산자(조류/수초) → 초식어 → 포식자, 개체 단위 시뮬레이션
    ============================================================ */
 const canvas = document.getElementById('sea');
@@ -289,7 +301,7 @@ function recordMorph(kind, g) {
   const e = codex.get(m.key);
   if (e) { e.seen++; return e; }
   codex.set(m.key, { ...m, kind, firstDay: env.day, seen: 1 });
-  if (m.rarity >= 2) addLog((m.rarity === 3 ? '전설의' : '희귀한') + ' 변이 발견: ' + m.name);
+  if (m.rarity >= 2) { addLog((m.rarity === 3 ? '전설의' : '희귀한') + ' 변이 발견: ' + m.name); sfx(m.rarity === 3 ? 'legend' : 'rare'); }
   return codex.get(m.key);
 }
 
@@ -469,6 +481,14 @@ function spawnBubble(x, y) {
 const logEl = document.getElementById('log');
 const logs = [];
 let dashOpen = false;
+/* 사운드 상태 (v0.9) — 부팅 중 sfx 호출(TDZ) 방지를 위해 상단 선언 */
+const SND_KEY = 'blueCycle.sound';
+const sndPref = (() => {
+  try { return Object.assign({ vol: 0.5, muted: false }, JSON.parse(localStorage.getItem(SND_KEY) || '{}')); }
+  catch (e) { return { vol: 0.5, muted: false }; }
+})();
+function saveSndPref() { try { localStorage.setItem(SND_KEY, JSON.stringify(sndPref)); } catch (e) {} }
+let actx = null, masterGain = null, noiseBuf = null, dayLayer = null, nightLayer = null;
 function addLog(msg) {
   logs.push({ d: env.day, msg });
   if (logs.length > 30) logs.shift();
@@ -642,6 +662,7 @@ if (!IS_SIM) {
 document.getElementById('btnFeed').addEventListener('click', () => {
   for (let i = 0; i < 18; i++) spawnAlgae(rand(W * 0.2, W * 0.8), rand(20, H * 0.3), true);
   addLog('먹이를 뿌렸다');
+  sfx('splash');
 });
 /* 터치: 개체에 가까우면 검사 카드, 빈 물이면 먹이 */
 let selFish = null;
@@ -703,8 +724,139 @@ canvas.addEventListener('pointerdown', e => {
   if (best && bd < 44 * 44) { selFish = best; renderInspect(); return; }
   hideInspect();
   for (let i = 0; i < 10; i++) spawnAlgae(e.clientX + rand(-30, 30), e.clientY + rand(-20, 20), true);
+  sfx('splash');
 });
 setInterval(() => { if (selFish) renderInspect(); }, 400);
+
+/* ---------- 사운드 · 앰비언스 (v0.9, WebAudio 절차 생성 — 외부 에셋 없음) ---------- */
+function initAudio() {
+  if (actx) { if (actx.state === 'suspended') actx.resume(); return; }
+  try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
+  masterGain = actx.createGain();
+  masterGain.gain.value = sndPref.muted ? 0 : sndPref.vol * 0.9;
+  masterGain.connect(actx.destination);
+  /* 브라운 노이즈 버퍼 — 물 소리의 원료 */
+  const len = actx.sampleRate * 2;
+  noiseBuf = actx.createBuffer(1, len, actx.sampleRate);
+  const ch = noiseBuf.getChannelData(0);
+  let last = 0;
+  for (let i = 0; i < len; i++) { const w = Math.random() * 2 - 1; last = (last + 0.02 * w) / 1.02; ch[i] = last * 3.4; }
+  const mkLayer = freq => {
+    const src = actx.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+    const f = actx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = freq; f.Q.value = 0.5;
+    const g = actx.createGain(); g.gain.value = 0;
+    src.connect(f); f.connect(g); g.connect(masterGain);
+    src.start();
+    return { f, g };
+  };
+  dayLayer = mkLayer(820);   /* 낮: 밝은 물결 */
+  nightLayer = mkLayer(300); /* 밤: 낮고 깊은 울림 */
+  updateSndUI();
+}
+/* 낮밤 크로스페이드 + 간헐적 물방울·반짝임 — 700ms 간격, 프레임 루프와 무관 */
+setInterval(() => {
+  if (!actx || !masterGain) return;
+  const t = actx.currentTime;
+  dayLayer.g.gain.setTargetAtTime(env.light * 0.085 * (paused ? 0.3 : 1), t, 0.6);
+  nightLayer.g.gain.setTargetAtTime((1 - env.light) * 0.10 * (paused ? 0.3 : 1), t, 0.6);
+  dayLayer.f.frequency.setTargetAtTime(700 + env.light * 300 + Math.sin(env.t * 0.4) * 60, t, 0.8);
+  if (!paused && Math.random() < (env.light > 0.4 ? 0.5 : 0.22)) blip(env.light > 0.4);
+}, 700);
+function blip(day) {
+  if (!actx || sndPref.muted) return;
+  const t0 = actx.currentTime;
+  if (day) {
+    /* 낮: 보글보글 물방울 */
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(rand(300, 700), t0);
+    o.frequency.exponentialRampToValueAtTime(rand(700, 1400), t0 + 0.09);
+    g.gain.setValueAtTime(0.028, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.12);
+    o.connect(g); g.connect(masterGain);
+    o.start(t0); o.stop(t0 + 0.13);
+  } else {
+    /* 밤: 드문드문한 고음 반짝임 */
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = 'sine'; o.frequency.value = rand(1500, 2400);
+    g.gain.setValueAtTime(0.012, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.5);
+    o.connect(g); g.connect(masterGain);
+    o.start(t0); o.stop(t0 + 0.52);
+  }
+}
+function sfx(kind) {
+  if (!actx || !masterGain || sndPref.muted) return;
+  const t0 = actx.currentTime;
+  if (kind === 'hunt') {
+    /* 사냥: 낮은 어택 + 짧은 잡음 */
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(110, t0);
+    o.frequency.exponentialRampToValueAtTime(46, t0 + 0.16);
+    g.gain.setValueAtTime(0.16, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.2);
+    o.connect(g); g.connect(masterGain);
+    o.start(t0); o.stop(t0 + 0.22);
+    const src = actx.createBufferSource(); src.buffer = noiseBuf;
+    src.playbackRate.value = 1.6;
+    const f = actx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 500;
+    const g2 = actx.createGain();
+    g2.gain.setValueAtTime(0.10, t0);
+    g2.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.1);
+    src.connect(f); f.connect(g2); g2.connect(masterGain);
+    src.start(t0); src.stop(t0 + 0.12);
+  } else if (kind === 'rare' || kind === 'legend') {
+    /* 희귀·전설 발견: 맑은 차임 아르페지오 */
+    const notes = kind === 'legend' ? [523, 659, 1046] : [660, 880];
+    notes.forEach((fq, i) => {
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = 'sine'; o.frequency.value = fq;
+      const t1 = t0 + i * 0.11;
+      g.gain.setValueAtTime(0.0001, t1);
+      g.gain.exponentialRampToValueAtTime(0.07, t1 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t1 + 0.6);
+      o.connect(g); g.connect(masterGain);
+      o.start(t1); o.stop(t1 + 0.65);
+    });
+  } else if (kind === 'splash') {
+    /* 먹이: 짧은 첨벙 */
+    const src = actx.createBufferSource(); src.buffer = noiseBuf;
+    src.playbackRate.value = 2.2;
+    const f = actx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 900;
+    const g = actx.createGain();
+    g.gain.setValueAtTime(0.09, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+    src.connect(f); f.connect(g); g.connect(masterGain);
+    src.start(t0); src.stop(t0 + 0.18);
+  }
+}
+/* 사운드 UI */
+const btnSnd = document.getElementById('btnSnd');
+const volRange = document.getElementById('volRange');
+volRange.value = Math.round(sndPref.vol * 100);
+function updateSndUI() {
+  btnSnd.textContent = sndPref.muted ? '🔇' : '🔊';
+  btnSnd.classList.toggle('off', sndPref.muted);
+}
+updateSndUI();
+btnSnd.addEventListener('click', () => {
+  initAudio();
+  sndPref.muted = !sndPref.muted;
+  saveSndPref();
+  if (masterGain) masterGain.gain.setTargetAtTime(sndPref.muted ? 0 : sndPref.vol * 0.9, actx.currentTime, 0.1);
+  updateSndUI();
+});
+volRange.addEventListener('input', () => {
+  sndPref.vol = volRange.value / 100;
+  if (sndPref.vol > 0 && sndPref.muted) { sndPref.muted = false; updateSndUI(); }
+  saveSndPref();
+  if (actx && masterGain && !sndPref.muted) masterGain.gain.setTargetAtTime(sndPref.vol * 0.9, actx.currentTime, 0.05);
+});
+/* 모바일 자동재생 제한: 첫 제스처에서 오디오 시작 */
+document.addEventListener('pointerdown', initAudio, { once: false });
+document.addEventListener('visibilitychange', () => { if (actx && !document.hidden && actx.state === 'suspended') actx.resume(); });
+window.__snd = () => ({ state: actx ? actx.state : 'none', muted: sndPref.muted, vol: sndPref.vol });
 
 /* ---------- 일시정지/속도 ---------- */
 let paused = false, speed = 1;
@@ -903,7 +1055,7 @@ function step(dt) {
       if (d < 13 * g.size + 6 * best.genes.size) {
         f.energy = clamp(f.energy + 32, 0, 110);
         const hi = herbs.indexOf(best);
-        if (hi >= 0) { herbs.splice(hi, 1); dropDetritus(f.x, f.y, 1.2); stats.hunts++; stats.deaths++; }
+        if (hi >= 0) { herbs.splice(hi, 1); dropDetritus(f.x, f.y, 1.2); stats.hunts++; stats.deaths++; sfx('hunt'); }
         if (!firstHuntLogged) { firstHuntLogged = true; addLog('포식자가 사냥에 성공했다'); }
         for (let b = 0; b < 3; b++) spawnBubble(f.x + rand(-6, 6), f.y + rand(-6, 6));
       }
@@ -920,7 +1072,7 @@ function step(dt) {
         if (d < 12 * g.size + 5 * bs.genes.size) {
           f.energy = clamp(f.energy + 16, 0, 110);
           const si = shrimps.indexOf(bs);
-          if (si >= 0) { shrimps.splice(si, 1); dropDetritus(f.x, f.y, 0.6); stats.hunts++; stats.deaths++; }
+          if (si >= 0) { shrimps.splice(si, 1); dropDetritus(f.x, f.y, 0.6); stats.hunts++; stats.deaths++; sfx('hunt'); }
         }
       } else {
         ax = Math.cos(f.wobble) * spd * 0.5; ay = Math.sin(f.wobble * 0.6) * spd * 0.4;
@@ -1100,7 +1252,7 @@ function step(dt) {
       if (d < 16 * g.size + 6 * best.genes.size) {
         f.energy = clamp(f.energy + gain, 0, 130);
         const pi = preyArr.indexOf(best);
-        if (pi >= 0) { preyArr.splice(pi, 1); dropDetritus(f.x, f.y, 2.5); stats.hunts++; stats.deaths++; }
+        if (pi >= 0) { preyArr.splice(pi, 1); dropDetritus(f.x, f.y, 2.5); stats.hunts++; stats.deaths++; sfx('hunt'); }
         addLog('대형 포식자가 ' + morphOf(preyArr === preds ? 'pred' : preyArr === jellies ? 'jelly' : preyArr === herbs ? 'herb' : 'shrimp', best.genes).name + '를 잡았다');
         for (let b = 0; b < 5; b++) spawnBubble(f.x + rand(-8, 8), f.y + rand(-8, 8));
         f.cool = 26; /* 포식 후 포만감: 연속 학살 방지 */
