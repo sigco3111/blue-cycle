@@ -33,6 +33,34 @@
     font-size:11px; color:rgba(180,220,240,.75); line-height:1.6; pointer-events:none;
     text-shadow:0 1px 3px rgba(0,0,0,.6);
   }
+  #dash {
+    position:fixed; left:0; right:0; bottom:0; z-index:20;
+    height:64vh; transform:translateY(102%); transition:transform .28s ease;
+    background:rgba(3,18,30,.92); backdrop-filter:blur(10px);
+    border-top:1px solid rgba(120,200,255,.25); border-radius:18px 18px 0 0;
+    color:#cfe9f7; font-family:-apple-system,'Pretendard','Noto Sans KR',sans-serif;
+    overflow-y:auto; -webkit-overflow-scrolling:touch; padding:0 16px 26px;
+  }
+  #dash.open { transform:translateY(0); }
+  #dashHead {
+    position:sticky; top:0; z-index:2; display:flex; justify-content:space-between; align-items:center;
+    background:rgba(3,18,30,.96); padding:12px 2px 10px; font-size:15px; font-weight:700; color:#eaf6ff;
+    border-bottom:1px solid rgba(120,200,255,.12);
+  }
+  #btnDashClose {
+    background:rgba(80,170,220,.16); color:#bfe4f7; border:1px solid rgba(120,200,255,.25);
+    border-radius:8px; padding:5px 14px; font-size:12px; cursor:pointer; font-family:inherit;
+  }
+  #dash .sec { margin-top:18px; }
+  #dash .secT { font-size:12px; color:#7fb6d9; margin-bottom:8px; letter-spacing:.02em; }
+  #dash canvas.chart { width:100%; display:block; background:rgba(10,35,55,.4); border-radius:10px; }
+  #dash .leg { display:flex; flex-wrap:wrap; gap:12px; margin-top:6px; font-size:11px; color:#a9cede; }
+  #dash .leg .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px; }
+  #dash .gstat { display:grid; grid-template-columns:1fr 1fr; gap:6px 14px; font-size:12.5px; }
+  #dash .gstat .row { display:flex; justify-content:space-between; background:rgba(10,35,55,.4); border-radius:8px; padding:7px 10px; }
+  #dash .gstat .row b { color:#fff; font-variant-numeric:tabular-nums; }
+  #dashLog { font-size:12px; line-height:1.75; color:#a9cede; }
+  #dashLog .d { color:#5f96b5; margin-right:6px; font-variant-numeric:tabular-nums; }
   #hint {
     position:fixed; right:12px; bottom:12px; z-index:10;
     font-family:-apple-system,'Pretendard','Noto Sans KR',sans-serif;
@@ -44,7 +72,7 @@
 <canvas id="sea"></canvas>
 <div id="hud">
   <h1>푸른 순환</h1>
-  <div class="ver">생태계 수족관 · v0.2 · <span id="cFps">--</span>fps</div>
+  <div class="ver">생태계 수족관 · v0.3 · <span id="cFps">--</span>fps</div>
   <div class="stat"><span><span class="dot" style="background:#69d67c"></span>조류</span><b id="cAlgae">0</b></div>
   <div class="stat"><span><span class="dot" style="background:#8fd3e8"></span>초식어</span><b id="cHerb">0</b></div>
   <div class="stat"><span><span class="dot" style="background:#f0918a"></span>포식자</span><b id="cPred">0</b></div>
@@ -53,7 +81,15 @@
     <button id="btnPause">일시정지</button>
     <button id="btnSpeed">1×</button>
     <button id="btnFeed">먹이</button>
+    <button id="btnDash">지표</button>
   </div>
+</div>
+<div id="dash">
+  <div id="dashHead"><span>생태계 지표</span><button id="btnDashClose">닫기</button></div>
+  <div class="sec"><div class="secT">개체수 추이 · 최근 5분</div><canvas id="chLine" class="chart" height="132"></canvas><div class="leg" id="lineLeg"></div></div>
+  <div class="sec"><div class="secT">생물량 비중</div><canvas id="chPie" class="chart" height="150"></canvas><div class="leg" id="pieLeg"></div></div>
+  <div class="sec"><div class="secT">세대 · 기록</div><div class="gstat" id="genStats"></div></div>
+  <div class="sec"><div class="secT">관찰 일지</div><div id="dashLog"></div></div>
 </div>
 <div id="log"></div>
 <div id="hint">방치해도 생태계가 저절로 돌아갑니다</div>
@@ -114,6 +150,12 @@ const env = {
   day: 0,              // 경과 '일' (45초 = 1일)
 };
 const DAY_LEN = 45;
+
+/* ---------- 통계 · 이력 (v0.3 대시보드) ---------- */
+const stats = { births: 0, deaths: 0, hunts: 0, mutations: 0, maxGenHerb: 1, maxGenPred: 1 };
+const HIST_MAX = 600; // 0.5초 × 600 = 5분
+const hist = { a: [], h: [], p: [] };
+let histAcc = 0;
 
 /* ---------- 조류 (부유 먹이 알갱이) ---------- */
 const ALGAE_MAX = 260;
@@ -211,9 +253,10 @@ function spawnBubble(x, y) {
 const logEl = document.getElementById('log');
 const logs = [];
 function addLog(msg) {
-  logs.push(msg);
-  if (logs.length > 3) logs.shift();
-  logEl.innerHTML = logs.map(m => '· ' + m).join('<br>');
+  logs.push({ d: env.day, msg });
+  if (logs.length > 30) logs.shift();
+  logEl.innerHTML = logs.slice(-3).map(l => '· ' + (l.d > 0 ? l.d + '일째 · ' : '') + l.msg).join('<br>');
+  if (dashOpen) renderDashLog();
 }
 let firstBreedLogged = false, firstDeathLogged = false, firstHuntLogged = false;
 
@@ -355,12 +398,19 @@ function step(dt) {
     // 번식
     if (f.energy > 82 && f.age > 12 && herbs.length < HERB_MAX - 2) {
       f.energy *= 0.52;
-      const child = spawnHerb(f.x + rand(-8, 8), f.y + rand(-8, 8), mutate(g, 1), f.gen + 1);
+      const ng = mutate(g, 1);
+      const child = spawnHerb(f.x + rand(-8, 8), f.y + rand(-8, 8), ng, f.gen + 1);
+      if (child) {
+        stats.births++;
+        if (f.gen + 1 > stats.maxGenHerb) { stats.maxGenHerb = f.gen + 1; if (stats.maxGenHerb >= 3) addLog('초식어 ' + stats.maxGenHerb + '세대 등장'); }
+        if (Math.abs(ng.hue - g.hue) > 10) { stats.mutations++; if (stats.mutations <= 3 || stats.mutations % 10 === 0) addLog('새로운 색의 변이 출현 (누적 ' + stats.mutations + ')'); }
+      }
       if (child && !firstBreedLogged) { firstBreedLogged = true; addLog('초식어 2세대가 태어났다'); }
     }
     // 죽음
     if (f.energy <= 0 || f.age > 150) {
       dropDetritus(f.x, f.y, 3.2);
+      stats.deaths++;
       herbs.splice(i, 1);
       if (!firstDeathLogged) { firstDeathLogged = true; addLog('죽은 개체가 영양염으로 돌아갔다'); }
     }
@@ -387,7 +437,7 @@ function step(dt) {
       if (d < 13 * g.size + 6 * best.genes.size) {
         f.energy = clamp(f.energy + 34, 0, 110);
         const hi = herbs.indexOf(best);
-        if (hi >= 0) { herbs.splice(hi, 1); dropDetritus(f.x, f.y, 1.2); }
+        if (hi >= 0) { herbs.splice(hi, 1); dropDetritus(f.x, f.y, 1.2); stats.hunts++; stats.deaths++; }
         if (!firstHuntLogged) { firstHuntLogged = true; addLog('포식자가 사냥에 성공했다'); }
         for (let b = 0; b < 3; b++) spawnBubble(f.x + rand(-6, 6), f.y + rand(-6, 6));
       }
@@ -407,10 +457,17 @@ function step(dt) {
 
     if (f.energy > 96 && f.age > 30 && preds.length < PRED_MAX) {
       f.energy *= 0.55;
-      spawnPred(f.x + rand(-10, 10), f.y + rand(-10, 10), mutate(g, 1), f.gen + 1);
+      const ng = mutate(g, 1);
+      const child = spawnPred(f.x + rand(-10, 10), f.y + rand(-10, 10), ng, f.gen + 1);
+      if (child) {
+        stats.births++;
+        if (f.gen + 1 > stats.maxGenPred) { stats.maxGenPred = f.gen + 1; addLog('포식자 ' + stats.maxGenPred + '세대 등장'); }
+        if (Math.abs(ng.hue - g.hue) > 10) stats.mutations++;
+      }
     }
     if (f.energy <= 0 || f.age > 220) {
       dropDetritus(f.x, f.y, 6);
+      stats.deaths++;
       preds.splice(i, 1);
     }
   }
@@ -422,6 +479,14 @@ function step(dt) {
     b.y -= b.vy * dt;
     b.x += Math.sin(b.drift + b.y * 0.02) * 8 * dt;
     if (b.y < -6) bubbles.splice(i, 1);
+  }
+
+  /* --- 이력 샘플링 --- */
+  histAcc += dt;
+  if (histAcc >= 0.5) {
+    histAcc = 0;
+    hist.a.push(algae.length); hist.h.push(herbs.length); hist.p.push(preds.length);
+    if (hist.a.length > HIST_MAX) { hist.a.shift(); hist.h.shift(); hist.p.shift(); }
   }
 
   /* --- 개체군 보정: 초식어 멸종 방지 (조류가 풍부하면 자연 유입) --- */
@@ -721,6 +786,142 @@ function updateHud(dt) {
   elT.textContent = env.day + '일';
   elF.textContent = Math.round(fpsEma);
   window.__fps = Math.round(fpsEma);
+}
+
+/* ============================================================
+   대시보드 (v0.3)
+   ============================================================ */
+const dashEl = document.getElementById('dash');
+const btnDash = document.getElementById('btnDash');
+let dashOpen = false;
+btnDash.addEventListener('click', () => {
+  dashOpen = !dashOpen;
+  dashEl.classList.toggle('open', dashOpen);
+  btnDash.classList.toggle('on', dashOpen);
+  if (dashOpen) drawDash();
+});
+document.getElementById('btnDashClose').addEventListener('click', () => {
+  dashOpen = false;
+  dashEl.classList.remove('open');
+  btnDash.classList.remove('on');
+});
+
+const SERIES = [
+  { key: 'a', name: '조류', color: '#69d67c' },
+  { key: 'h', name: '초식어', color: '#8fd3e8' },
+  { key: 'p', name: '포식자', color: '#f0918a' },
+];
+function fitCanvas(cv, hCss) {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = cv.clientWidth || (window.innerWidth - 32);
+  cv.width = w * dpr; cv.height = hCss * dpr;
+  cv.style.height = hCss + 'px';
+  const c = cv.getContext('2d');
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return [c, w, hCss];
+}
+
+function drawLineChart() {
+  const cv = document.getElementById('chLine');
+  const [c, w, h] = fitCanvas(cv, 132);
+  const padL = 30, padB = 16, padT = 8, padR = 8;
+  const n = hist.a.length;
+  let maxV = 10;
+  for (const s of SERIES) for (const v of hist[s.key]) if (v > maxV) maxV = v;
+  maxV = Math.ceil(maxV * 1.15 / 10) * 10;
+  /* 격자 */
+  c.strokeStyle = 'rgba(120,190,230,0.12)'; c.lineWidth = 1;
+  c.fillStyle = 'rgba(140,190,215,0.6)'; c.font = '10px sans-serif'; c.textAlign = 'right';
+  for (let i = 0; i <= 4; i++) {
+    const y = padT + (h - padT - padB) * i / 4;
+    c.beginPath(); c.moveTo(padL, y); c.lineTo(w - padR, y); c.stroke();
+    c.fillText(Math.round(maxV * (4 - i) / 4), padL - 5, y + 3);
+  }
+  const x0 = padL, x1 = w - padR;
+  for (const s of SERIES) {
+    const arr = hist[s.key];
+    if (arr.length < 2) continue;
+    c.strokeStyle = s.color; c.lineWidth = 1.8; c.lineJoin = 'round';
+    c.beginPath();
+    for (let i = 0; i < arr.length; i++) {
+      const px = x0 + (x1 - x0) * (i / (HIST_MAX - 1));
+      const y = padT + (h - padT - padB) * (1 - arr[i] / maxV);
+      if (i === 0) c.moveTo(px, y); else c.lineTo(px, y);
+    }
+    c.stroke();
+    /* 현재값 점 */
+    const lx = x0 + (x1 - x0) * ((arr.length - 1) / (HIST_MAX - 1));
+    const ly = padT + (h - padT - padB) * (1 - arr[arr.length - 1] / maxV);
+    c.fillStyle = s.color;
+    c.beginPath(); c.arc(lx, ly, 3, 0, TAU); c.fill();
+  }
+  document.getElementById('lineLeg').innerHTML = SERIES.map(s =>
+    `<span><span class="dot" style="background:${s.color}"></span>${s.name} ${hist[s.key].length ? hist[s.key][hist[s.key].length - 1] : 0}</span>`).join('');
+}
+
+function biomass() {
+  let a = 0, h = 0, p = 0;
+  for (const x of algae) a += x.e * 0.25;
+  for (const f of herbs) h += 9 * f.genes.size ** 3;
+  for (const f of preds) p += 42 * f.genes.size ** 3;
+  return [
+    { name: '조류', v: a, color: '#69d67c' },
+    { name: '초식어', v: h, color: '#8fd3e8' },
+    { name: '포식자', v: p, color: '#f0918a' },
+  ];
+}
+function drawPie() {
+  const cv = document.getElementById('chPie');
+  const [c, w, h] = fitCanvas(cv, 150);
+  const data = biomass();
+  const total = data.reduce((s, d) => s + d.v, 0) || 1;
+  const cx = w / 2, cy = h / 2, r = Math.min(w, h) / 2 - 14, rw = 20;
+  let a0 = -Math.PI / 2;
+  for (const d of data) {
+    const a1 = a0 + (d.v / total) * TAU;
+    c.strokeStyle = d.color; c.lineWidth = rw;
+    c.beginPath();
+    c.arc(cx, cy, r - rw / 2, a0 + 0.02, a1 - 0.02);
+    c.stroke();
+    a0 = a1;
+  }
+  c.fillStyle = 'rgba(234,246,255,0.92)'; c.font = '700 15px sans-serif'; c.textAlign = 'center';
+  c.fillText(Math.round(total), cx, cy + 1);
+  c.fillStyle = 'rgba(140,190,215,0.7)'; c.font = '10px sans-serif';
+  c.fillText('총 생물량', cx, cy + 15);
+  document.getElementById('pieLeg').innerHTML = data.map(d =>
+    `<span><span class="dot" style="background:${d.color}"></span>${d.name} ${(d.v / total * 100).toFixed(1)}%</span>`).join('');
+}
+
+function drawGenStats() {
+  const items = [
+    ['초식어 최고 세대', stats.maxGenHerb + '세대'],
+    ['포식자 최고 세대', stats.maxGenPred + '세대'],
+    ['누적 탄생', stats.births],
+    ['누적 죽음', stats.deaths],
+    ['사냥 성공', stats.hunts],
+    ['변이 출현', stats.mutations],
+  ];
+  document.getElementById('genStats').innerHTML = items.map(([k, v]) =>
+    `<div class="row"><span>${k}</span><b>${v}</b></div>`).join('');
+}
+
+function renderDashLog() {
+  document.getElementById('dashLog').innerHTML = logs.slice().reverse().map(l =>
+    `<div><span class="d">${l.d}일</span>${l.msg}</div>`).join('');
+}
+
+function drawDash() {
+  drawLineChart();
+  drawPie();
+  drawGenStats();
+  renderDashLog();
+}
+setInterval(() => { if (dashOpen) drawDash(); }, 500);
+if (location.hash === '#dash') {
+  dashOpen = true;
+  dashEl.classList.add('open'); btnDash.classList.add('on');
+  setTimeout(drawDash, 800);
 }
 
 /* ---------- 메인 루프 ---------- */
