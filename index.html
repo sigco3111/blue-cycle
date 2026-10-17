@@ -60,6 +60,27 @@
   #dash .gstat .row { display:flex; justify-content:space-between; background:rgba(10,35,55,.4); border-radius:8px; padding:7px 10px; }
   #dash .gstat .row b { color:#fff; font-variant-numeric:tabular-nums; }
   #dashLog { font-size:12px; line-height:1.75; color:#a9cede; }
+  #dexGrid { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  #dexGrid .m { display:flex; align-items:center; gap:7px; background:rgba(10,35,55,.4); border-radius:8px; padding:6px 8px; font-size:11px; color:#a9cede; }
+  #dexGrid .m .dot { flex:none; width:14px; height:14px; border-radius:50%; box-shadow:0 0 6px rgba(255,255,255,.25) inset; }
+  #dexGrid .m .nm { color:#dceef8; }
+  #dexGrid .m .rr { margin-left:auto; flex:none; font-size:9.5px; padding:1px 6px; border-radius:6px; }
+  .rr.c0 { background:rgba(120,150,170,.25); color:#9fb8c8; }
+  .rr.c1 { background:rgba(80,160,120,.3); color:#9fe0b8; }
+  .rr.c2 { background:rgba(70,130,220,.35); color:#a9ccff; }
+  .rr.c3 { background:rgba(200,120,40,.4); color:#ffd9a0; }
+  #inspect {
+    position:fixed; left:16px; right:16px; bottom:16px; z-index:5;
+    background:rgba(8,26,42,.92); border:1px solid rgba(130,200,240,.35); border-radius:12px;
+    padding:10px 12px; font-size:12px; color:#a9cede; display:none; backdrop-filter:blur(4px);
+  }
+  #inspect.show { display:block; }
+  #inspect .ih { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+  #inspect .idot { width:16px; height:16px; border-radius:50%; }
+  #inspect .inm { color:#fff; font-weight:700; }
+  #inspect .ix { margin-left:auto; background:none; border:1px solid rgba(130,200,240,.4); color:#a9cede; border-radius:8px; padding:2px 9px; font-size:11px; cursor:pointer; }
+  #inspect .igrid { display:grid; grid-template-columns:1fr 1fr; gap:3px 12px; font-variant-numeric:tabular-nums; }
+  #inspect .igrid b { color:#dceef8; font-weight:600; }
   #dashLog .d { color:#5f96b5; margin-right:6px; font-variant-numeric:tabular-nums; }
   #hint {
     position:fixed; right:12px; bottom:12px; z-index:10;
@@ -72,7 +93,7 @@
 <canvas id="sea"></canvas>
 <div id="hud">
   <h1>푸른 순환</h1>
-  <div class="ver">생태계 수족관 · v0.4 · <span id="cFps">--</span>fps</div>
+  <div class="ver">생태계 수족관 · v0.5 · <span id="cFps">--</span>fps</div>
   <div class="stat"><span><span class="dot" style="background:#69d67c"></span>조류</span><b id="cAlgae">0</b></div>
   <div class="stat"><span><span class="dot" style="background:#8fd3e8"></span>초식어</span><b id="cHerb">0</b></div>
   <div class="stat"><span><span class="dot" style="background:#f0918a"></span>포식자</span><b id="cPred">0</b></div>
@@ -84,6 +105,7 @@
     <button id="btnDash">지표</button>
   </div>
 </div>
+<div id="inspect"></div>
 <div id="dash">
   <div id="dashHead"><span>생태계 지표</span><button id="btnDashClose">닫기</button></div>
   <div class="sec"><div class="secT">환경 상태</div><div class="gstat" id="envStats"></div></div>
@@ -91,6 +113,7 @@
   <div class="sec"><div class="secT">개체수 추이 · 최근 5분</div><canvas id="chLine" class="chart" height="132"></canvas><div class="leg" id="lineLeg"></div></div>
   <div class="sec"><div class="secT">생물량 비중</div><canvas id="chPie" class="chart" height="150"></canvas><div class="leg" id="pieLeg"></div></div>
   <div class="sec"><div class="secT">세대 · 기록</div><div class="gstat" id="genStats"></div></div>
+  <div class="sec"><div class="secT">도감 · 발견한 형태 <span id="dexCount" style="color:#dceef8"></span></div><div id="dexGrid"></div></div>
   <div class="sec"><div class="secT">관찰 일지</div><div id="dashLog"></div></div>
 </div>
 <div id="log"></div>
@@ -98,7 +121,7 @@
 <script>
 'use strict';
 /* ============================================================
-   푸른 순환 v0.4 — 생태계 수족관 (낮밤·수온·산소 환경 변수 + 이벤트)
+   푸른 순환 v0.5 — 생태계 수족관 (도감·유전 수집 + 개체 검사)
    생산자(조류/수초) → 초식어 → 포식자, 개체 단위 시뮬레이션
    ============================================================ */
 const canvas = document.getElementById('sea');
@@ -177,6 +200,38 @@ const HIST_MAX = 600; // 0.5초 × 600 = 5분
 const hist = { a: [], h: [], p: [], o: [], tp: [] };
 let histAcc = 0;
 
+/* ---------- 도감 · 유전 (v0.5) ---------- */
+const HUE_BANDS = [
+  [15, '붉은'], [45, '주황'], [75, '황금'], [105, '연두'], [150, '초록'], [180, '청록'],
+  [210, '하늘'], [240, '파란'], [270, '남빛'], [300, '보라'], [330, '자주'], [360, '붉은'],
+];
+function hueName(h) { for (const [lim, n] of HUE_BANDS) if (h < lim) return n; return '붉은'; }
+function sizeName(v) { return v < 0.9 ? '작은' : v > 1.12 ? '큰' : ''; }
+function speedName(v) { return v < 0.92 ? '느린' : v > 1.1 ? '빠른' : ''; }
+const RARITY = ['흔함', '드묾', '희귀', '전설'];
+function morphOf(kind, g) {
+  const baseHue = kind === 'herb' ? 190 : 0;
+  let hd = Math.abs(g.hue - baseHue); if (hd > 180) hd = 360 - hd;
+  const dev = Math.abs(g.size - 1) / 0.45 + Math.abs(g.speed - 1) / 0.35 + hd / 120;
+  const rarity = dev < 0.3 ? 0 : dev < 0.65 ? 1 : dev < 1.05 ? 2 : 3;
+  const adj = [sizeName(g.size), speedName(g.speed)].filter(Boolean).join(' ');
+  const sp = kind === 'herb' ? '초식어' : '포식어';
+  return {
+    key: kind + ':' + hueName(g.hue) + ':' + (sizeName(g.size) || '보통') + ':' + (speedName(g.speed) || '보통'),
+    name: hueName(g.hue) + '빛' + (adj ? ' ' + adj : '') + ' ' + sp,
+    rarity, hue: g.hue,
+  };
+}
+const codex = new Map(); // key -> {name, rarity, hue, kind, firstDay, seen}
+function recordMorph(kind, g) {
+  const m = morphOf(kind, g);
+  const e = codex.get(m.key);
+  if (e) { e.seen++; return e; }
+  codex.set(m.key, { ...m, kind, firstDay: env.day, seen: 1 });
+  if (m.rarity >= 2) addLog((m.rarity === 3 ? '전설의' : '희귀한') + ' 변이 발견: ' + m.name);
+  return codex.get(m.key);
+}
+
 /* ---------- 조류 (부유 먹이 알갱이) ---------- */
 const ALGAE_MAX = 260;
 const algae = [];
@@ -245,6 +300,7 @@ const herbs = [];
 function spawnHerb(x, y, genes, gen) {
   if (herbs.length >= HERB_MAX) return null;
   const g = genes || { size: rand(0.85, 1.15), speed: rand(0.9, 1.1), hue: rand(175, 205) };
+  recordMorph('herb', g);
   const f = baseFish(x !== undefined ? x : rand(30, W - 30), y !== undefined ? y : rand(H * 0.25, H * 0.75), g);
   f.gen = gen || 1;
   herbs.push(f);
@@ -257,6 +313,7 @@ const preds = [];
 function spawnPred(x, y, genes, gen) {
   if (preds.length >= PRED_MAX) return null;
   const g = genes || { size: rand(1.0, 1.2), speed: rand(0.95, 1.1), hue: rand(345, 375) % 360 };
+  recordMorph('pred', g);
   const f = baseFish(x !== undefined ? x : rand(40, W - 40), y !== undefined ? y : rand(H * 0.2, H * 0.6), g);
   f.gen = gen || 1;
   f.energy = 80;
@@ -291,9 +348,37 @@ document.getElementById('btnFeed').addEventListener('click', () => {
   for (let i = 0; i < 18; i++) spawnAlgae(rand(W * 0.2, W * 0.8), rand(20, H * 0.3), true);
   addLog('먹이를 뿌렸다');
 });
+/* 터치: 개체에 가까우면 검사 카드, 빈 물이면 먹이 */
+let selFish = null;
+const inspectEl = document.getElementById('inspect');
+function hideInspect() { selFish = null; inspectEl.classList.remove('show'); }
+function renderInspect() {
+  if (!selFish) return;
+  if (!herbs.includes(selFish) && !preds.includes(selFish)) { hideInspect(); return; }
+  const f = selFish, g = f.genes;
+  const kind = herbs.includes(f) ? 'herb' : 'pred';
+  const m = morphOf(kind, g);
+  inspectEl.innerHTML =
+    `<div class="ih"><span class="idot" style="background:hsl(${g.hue},65%,60%)"></span>` +
+    `<span class="inm">${m.name}</span><span class="rr c${m.rarity}">${RARITY[m.rarity]}</span>` +
+    `<button class="ix" id="inspectX">닫기</button></div>` +
+    `<div class="igrid"><span>세대 <b>${f.gen}세대</b></span><span>나이 <b>${Math.floor(f.age)}초</b></span>` +
+    `<span>에너지 <b>${Math.round(f.energy)}</b></span><span>크기 <b>×${g.size.toFixed(2)}</b></span>` +
+    `<span>속도 <b>×${g.speed.toFixed(2)}</b></span><span>색상 <b>${Math.round(g.hue)}°</b></span></div>`;
+  inspectEl.classList.add('show');
+  document.getElementById('inspectX').addEventListener('click', ev => { ev.stopPropagation(); hideInspect(); });
+}
 canvas.addEventListener('pointerdown', e => {
+  const r = canvas.getBoundingClientRect();
+  const tx = e.clientX - r.left, ty = e.clientY - r.top;
+  let best = null, bd = 1e9;
+  for (const f of herbs) { const dx = f.x - tx, dy = f.y - ty, d2 = dx * dx + dy * dy; if (d2 < bd) { bd = d2; best = f; } }
+  for (const f of preds) { const dx = f.x - tx, dy = f.y - ty, d2 = dx * dx + dy * dy; if (d2 < bd) { bd = d2; best = f; } }
+  if (best && bd < 44 * 44) { selFish = best; renderInspect(); return; }
+  hideInspect();
   for (let i = 0; i < 10; i++) spawnAlgae(e.clientX + rand(-30, 30), e.clientY + rand(-20, 20), true);
 });
+setInterval(() => { if (selFish) renderInspect(); }, 400);
 
 /* ---------- 일시정지/속도 ---------- */
 let paused = false, speed = 1;
@@ -978,11 +1063,20 @@ function drawGenStats() {
     ['누적 죽음', stats.deaths],
     ['사냥 성공', stats.hunts],
     ['변이 출현', stats.mutations],
+    ['도감 발견', codex.size + '종'],
   ];
   document.getElementById('genStats').innerHTML = items.map(([k, v]) =>
     `<div class="row"><span>${k}</span><b>${v}</b></div>`).join('');
 }
 
+function drawDex() {
+  const arr = [...codex.values()].sort((a, b) => b.rarity - a.rarity || a.firstDay - b.firstDay);
+  document.getElementById('dexCount').textContent = arr.length + '종';
+  document.getElementById('dexGrid').innerHTML = arr.map(m =>
+    `<div class="m"><span class="dot" style="background:hsl(${m.hue},65%,55%)"></span>` +
+    `<span><span class="nm">${m.name}</span><br>${m.firstDay}일 발견 · ${m.seen}마리</span>` +
+    `<span class="rr c${m.rarity}">${RARITY[m.rarity]}</span></div>`).join('');
+}
 function renderDashLog() {
   document.getElementById('dashLog').innerHTML = logs.slice().reverse().map(l =>
     `<div><span class="d">${l.d}일</span>${l.msg}</div>`).join('');
@@ -1038,6 +1132,7 @@ function drawEnvChart() {
     `<span><span class="dot" style="background:${s.color}"></span>${s.name} ${hist[s.key].length ? hist[s.key][hist[s.key].length - 1] : 0}</span>`).join('');
 }
 function drawDash() {
+  drawDex();
   drawEnvStats();
   drawEnvChart();
   drawLineChart();
@@ -1072,6 +1167,16 @@ function frame(now) {
   for (const f of herbs) drawFish(f, t, 'herb');
   for (const f of preds) drawFish(f, t, 'pred');
   drawBubbles();
+
+  /* 선택 개체 강조 링 (v0.5) */
+  if (selFish && (herbs.includes(selFish) || preds.includes(selFish))) {
+    const rr = 16 * selFish.genes.size + 6;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,235,160,0.85)'; ctx.lineWidth = 1.6;
+    ctx.setLineDash([5, 4]); ctx.lineDashOffset = -env.t * 20;
+    ctx.beginPath(); ctx.arc(selFish.x, selFish.y, rr, 0, TAU); ctx.stroke();
+    ctx.restore();
+  }
 
   /* --- 낮밤 · 이벤트 분위기 (v0.4) --- */
   if (env.bloom > 0) {
