@@ -913,9 +913,10 @@ function drawLineChart() {
   for (const s of SERIES) {
     const arr = hist[s.key];
     if (arr.length < 2) continue;
+    const stride = Math.max(1, Math.ceil(arr.length / 150));
     c.strokeStyle = s.color; c.lineWidth = 1.8; c.lineJoin = 'round';
     c.beginPath();
-    for (let i = 0; i < arr.length; i++) {
+    for (let i = 0; i < arr.length; i += stride) {
       const px = x0 + (x1 - x0) * (i / (HIST_MAX - 1));
       const y = padT + (h - padT - padB) * (1 - arr[i] / maxV);
       if (i === 0) c.moveTo(px, y); else c.lineTo(px, y);
@@ -1015,9 +1016,10 @@ function drawEnvChart() {
   for (const s of ENV_SERIES) {
     const arr = hist[s.key];
     if (arr.length < 2) continue;
+    const stride = Math.max(1, Math.ceil(arr.length / 150));
     c.strokeStyle = s.color; c.lineWidth = 1.8; c.lineJoin = 'round';
     c.beginPath();
-    for (let i = 0; i < arr.length; i++) {
+    for (let i = 0; i < arr.length; i += stride) {
       const px = x0 + (x1 - x0) * (i / (HIST_MAX - 1));
       const y = padT + (h - padT - padB) * (1 - clamp(arr[i], 0, maxV) / maxV);
       if (i === 0) c.moveTo(px, y); else c.lineTo(px, y);
