@@ -82,6 +82,32 @@
   #inspect .igrid { display:grid; grid-template-columns:1fr 1fr; gap:3px 12px; font-variant-numeric:tabular-nums; }
   #inspect .igrid b { color:#dceef8; font-weight:600; }
   #dashLog .d { color:#5f96b5; margin-right:6px; font-variant-numeric:tabular-nums; }
+  /* 저장 모달 · 정산 카드 (v0.6) */
+  #saveModal {
+    position:fixed; inset:0; z-index:30; display:none; align-items:center; justify-content:center;
+    background:rgba(2,8,16,.6); backdrop-filter:blur(3px);
+  }
+  #saveModal.show { display:flex; }
+  #saveBox {
+    width:min(340px, calc(100vw - 32px)); background:rgba(8,26,42,.97); border:1px solid rgba(130,200,240,.35);
+    border-radius:14px; padding:14px; font-size:12.5px; color:#a9cede;
+  }
+  #saveBox h2 { margin:0 0 10px; font-size:15px; color:#fff; }
+  #saveBox .slot { background:rgba(10,35,55,.5); border-radius:10px; padding:9px 10px; margin-bottom:8px; }
+  #saveBox .slot .st { display:flex; justify-content:space-between; align-items:center; }
+  #saveBox .slot .si { color:#7fb6d9; font-size:11px; margin-top:2px; min-height:14px; }
+  #saveBox .sbtn { background:rgba(70,130,180,.3); border:1px solid rgba(130,200,240,.4); color:#dceef8; border-radius:8px; padding:3px 10px; font-size:11.5px; cursor:pointer; margin-left:6px; }
+  #saveBox .sbtn.warn { border-color:rgba(240,160,120,.5); color:#ffc9a8; }
+  #saveBox .foot { display:flex; justify-content:space-between; margin-top:10px; }
+  #settle {
+    position:fixed; left:16px; right:16px; top:30%; z-index:25; display:none;
+    background:rgba(8,26,42,.95); border:1px solid rgba(130,200,240,.4); border-radius:14px;
+    padding:14px; font-size:12.5px; color:#a9cede; line-height:1.7;
+  }
+  #settle.show { display:block; }
+  #settle h3 { margin:0 0 6px; font-size:14px; color:#fff; }
+  #settle b { color:#dceef8; }
+  #settle button { margin-top:10px; width:100%; background:rgba(70,130,180,.35); border:1px solid rgba(130,200,240,.45); color:#fff; border-radius:9px; padding:7px; font-size:13px; cursor:pointer; }
   #hint {
     position:fixed; right:12px; bottom:12px; z-index:10;
     font-family:-apple-system,'Pretendard','Noto Sans KR',sans-serif;
@@ -93,7 +119,7 @@
 <canvas id="sea"></canvas>
 <div id="hud">
   <h1>푸른 순환</h1>
-  <div class="ver">생태계 수족관 · v0.5 · <span id="cFps">--</span>fps</div>
+  <div class="ver">생태계 수족관 · v0.6 · <span id="cFps">--</span>fps</div>
   <div class="stat"><span><span class="dot" style="background:#69d67c"></span>조류</span><b id="cAlgae">0</b></div>
   <div class="stat"><span><span class="dot" style="background:#8fd3e8"></span>초식어</span><b id="cHerb">0</b></div>
   <div class="stat"><span><span class="dot" style="background:#f0918a"></span>포식자</span><b id="cPred">0</b></div>
@@ -103,9 +129,12 @@
     <button id="btnSpeed">1×</button>
     <button id="btnFeed">먹이</button>
     <button id="btnDash">지표</button>
+    <button id="btnSave">저장</button>
   </div>
 </div>
 <div id="inspect"></div>
+<div id="settle"></div>
+<div id="saveModal"><div id="saveBox"></div></div>
 <div id="dash">
   <div id="dashHead"><span>생태계 지표</span><button id="btnDashClose">닫기</button></div>
   <div class="sec"><div class="secT">환경 상태</div><div class="gstat" id="envStats"></div></div>
@@ -121,7 +150,7 @@
 <script>
 'use strict';
 /* ============================================================
-   푸른 순환 v0.5 — 생태계 수족관 (도감·유전 수집 + 개체 검사)
+   푸른 순환 v0.6 — 생태계 수족관 (저장·오프라인 정산)
    생산자(조류/수초) → 초식어 → 포식자, 개체 단위 시뮬레이션
    ============================================================ */
 const canvas = document.getElementById('sea');
@@ -224,6 +253,7 @@ function morphOf(kind, g) {
 }
 const codex = new Map(); // key -> {name, rarity, hue, kind, firstDay, seen}
 function recordMorph(kind, g) {
+  if (restoring) return null;
   const m = morphOf(kind, g);
   const e = codex.get(m.key);
   if (e) { e.seen++; return e; }
@@ -339,9 +369,131 @@ function addLog(msg) {
 let firstBreedLogged = false, firstDeathLogged = false, firstHuntLogged = false;
 
 /* ---------- 초기 개체 ---------- */
-for (let i = 0; i < 130; i++) spawnAlgae();
-for (let i = 0; i < 26; i++) spawnHerb();
-for (let i = 0; i < 4; i++) spawnPred();
+/* ---------- 저장 · 오프라인 정산 (v0.6) ---------- */
+const SAVE_VER = 6;
+const SAVE_KEY = n => 'blueCycle.save.' + n;
+const SLOT_KEY = 'blueCycle.slot';
+const IS_SIM = new URLSearchParams(location.search).has('sim');
+const activeSlot = () => { const n = parseInt(localStorage.getItem(SLOT_KEY) || '1', 10); return (n >= 1 && n <= 3) ? n : 1; };
+
+function packFish(f) { return [Math.round(f.x), Math.round(f.y), Math.round(f.energy), Math.round(f.age), f.gen, +f.genes.size.toFixed(3), +f.genes.speed.toFixed(3), Math.round(f.genes.hue)]; }
+function serialize() {
+  return JSON.stringify({
+    v: SAVE_VER, savedAt: Date.now(),
+    env: { nutrients: env.nutrients, oxygen: env.oxygen, temp: env.temp, t: env.t },
+    stats, logs: logs.slice(-30), codex: [...codex.entries()],
+    algae: algae.map(a => [Math.round(a.x), Math.round(a.y), +a.r.toFixed(1), Math.round(a.e)]),
+    herbs: herbs.map(packFish), preds: preds.map(packFish),
+  });
+}
+function readSlot(n) {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY(n));
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    if (!d || d.v !== SAVE_VER || !d.env || !Array.isArray(d.herbs) || !Array.isArray(d.preds) || !Array.isArray(d.algae)) throw new Error('shape');
+    return d;
+  } catch {
+    /* 손상 데이터는 격리하고 슬롯을 비움 — 절대 깨진 상태로 시작하지 않음 */
+    try {
+      const raw = localStorage.getItem(SAVE_KEY(n));
+      if (raw) localStorage.setItem(SAVE_KEY(n) + '.corrupt', raw);
+      localStorage.removeItem(SAVE_KEY(n));
+    } catch {}
+    return 'corrupt';
+  }
+}
+
+let restoring = false;
+function initWorld(d) {
+  if (!d) {
+    for (let i = 0; i < 130; i++) spawnAlgae();
+    for (let i = 0; i < 26; i++) spawnHerb();
+    for (let i = 0; i < 4; i++) spawnPred();
+    return null;
+  }
+  restoring = true;
+  env.nutrients = clamp(+d.env.nutrients || 0.6, 0, 1);
+  env.oxygen = clamp(+d.env.oxygen || 0.6, 0, 1);
+  env.temp = clamp(+d.env.temp || 22, 10, 35);
+  env.t = Math.max(0, +d.env.t || 0);
+  env.day = Math.floor(env.t / DAY_LEN);
+  Object.assign(stats, d.stats || {});
+  for (const l of (d.logs || []).slice(-30)) if (l && typeof l.msg === 'string') logs.push({ d: l.d | 0, msg: String(l.msg).slice(0, 90) });
+  for (const kv of (d.codex || [])) if (Array.isArray(kv) && kv[1] && kv[1].name) codex.set(kv[0], kv[1]);
+  for (const a of d.algae.slice(0, ALGAE_MAX)) {
+    const [x, y, r, e] = a;
+    if (!isFinite(x) || !isFinite(y)) continue;
+    algae.push({ x: clamp(x, 4, W - 4), y: clamp(y, 4, H - 8), vx: rand(-4, 4), vy: rand(-2, 2), r: clamp(r || 2, 1, 5), e: clamp(e || 12, 4, 30), ph: rand(0, TAU) });
+  }
+  const unpack = (arr, kind) => {
+    for (const p of arr) {
+      if (!Array.isArray(p)) continue;
+      const [x, y, e, age, gen, sz, sp, hue] = p;
+      if (![x, y, sz, sp, hue].every(isFinite)) continue;
+      const g = { size: clamp(sz, 0.75, 1.45), speed: clamp(sp, 0.75, 1.35), hue: ((hue % 360) + 360) % 360 };
+      const f = kind === 'herb'
+        ? spawnHerb(clamp(x, 12, W - 12), clamp(y, 14, H - 22), g, (gen | 0) || 1)
+        : spawnPred(clamp(x, 16, W - 16), clamp(y, 16, H - 30), g, (gen | 0) || 1);
+      if (f) { f.energy = clamp(e || 50, 1, 110); f.age = Math.max(0, age || 0); }
+    }
+  };
+  unpack(d.herbs.slice(0, HERB_MAX), 'herb');
+  unpack(d.preds.slice(0, PRED_MAX), 'pred');
+  restoring = false;
+  return { savedAt: d.savedAt };
+}
+
+/* 오프라인 정산: 떠나 있던 시간(최대 8시간)을 청크로 돌려 반영 — UI는 살아 있고 진행률 표시 */
+const settleEl = document.getElementById('settle');
+function startSettle(savedAt) {
+  if (!isFinite(savedAt)) return;
+  const elapsed = clamp((Date.now() - savedAt) / 1000, 0, 8 * 3600);
+  if (elapsed < 120) return;
+  const before = { day: env.day, h: herbs.length, p: preds.length, dex: codex.size };
+  const steps = Math.floor(elapsed / 0.25);
+  let done = 0;
+  settleEl.innerHTML = '<h3>자리를 비운 사이</h3>수족관의 시간을 따라잡는 중… <b id="settlePct">0%</b>';
+  settleEl.classList.add('show');
+  const pctEl = () => document.getElementById('settlePct');
+  const CHUNK = 6000;
+  (function run() {
+    const end = Math.min(done + CHUNK, steps);
+    for (; done < end; done++) step(0.25);
+    if (done < steps) {
+      if (pctEl()) pctEl().textContent = Math.round(done / steps * 100) + '%';
+      setTimeout(run, 0);
+      return;
+    }
+    const after = { day: env.day, h: herbs.length, p: preds.length, dex: codex.size };
+    addLog('돌아오니 ' + (after.day - before.day) + '일이 지나 있었다');
+    const hh = Math.floor(elapsed / 3600), mm = Math.floor((elapsed % 3600) / 60);
+    settleEl.innerHTML = `<h3>자리를 비운 사이</h3>` +
+      `${hh > 0 ? hh + '시간 ' : ''}${mm}분 동안 수족관은 계속 살아 있었습니다 (최대 8시간 정산)<br>` +
+      `경과 <b>${before.day}일 → ${after.day}일</b> · ` +
+      `초식어 <b>${before.h} → ${after.h}</b> · ` +
+      `포식자 <b>${before.p} → ${after.p}</b> · ` +
+      `도감 <b>${before.dex} → ${after.dex}종</b>` +
+      `<button id="settleOk">확인</button>`;
+    document.getElementById('settleOk').addEventListener('click', () => settleEl.classList.remove('show'));
+  })();
+}
+
+/* 부팅: 활성 슬롯을 읽어 복원, 손상 시 안전하게 새 수족관 */
+if (!IS_SIM) {
+  const d = readSlot(activeSlot());
+  if (d === 'corrupt') {
+    initWorld(null);
+    addLog('저장 데이터가 손상되어 새 수족관을 시작했다');
+  } else if (d) {
+    const info = initWorld(d);
+    if (info) startSettle(info.savedAt);
+  } else {
+    initWorld(null);
+  }
+} else {
+  initWorld(null);
+}
 
 /* ---------- 개입: 먹이 ---------- */
 document.getElementById('btnFeed').addEventListener('click', () => {
@@ -1145,6 +1297,61 @@ if (location.hash === '#dash') {
   dashOpen = true;
   dashEl.classList.add('open'); btnDash.classList.add('on');
   setTimeout(drawDash, 800);
+}
+
+/* ---------- 저장 UI · 자동저장 (v0.6) ---------- */
+const saveModalEl = document.getElementById('saveModal');
+const saveBoxEl = document.getElementById('saveBox');
+function slotSummary(d) {
+  if (d === 'corrupt') return '손상된 데이터 (자동 격리됨)';
+  if (!d) return '비어 있음';
+  const day = Math.floor((d.env.t || 0) / DAY_LEN);
+  const when = new Date(d.savedAt);
+  const mm = (when.getMonth() + 1) + '/' + when.getDate() + ' ' + String(when.getHours()).padStart(2, '0') + ':' + String(when.getMinutes()).padStart(2, '0');
+  return day + '일차 · 도감 ' + (d.codex ? d.codex.length : 0) + '종 · ' + mm + ' 저장';
+}
+function renderSaveBox() {
+  const cur = activeSlot();
+  let html = '<h2>저장 관리</h2>';
+  for (let n = 1; n <= 3; n++) {
+    const d = readSlot(n);
+    const has = d && d !== 'corrupt';
+    html += `<div class="slot"><div class="st"><span>슬롯 ${n}${n === cur ? ' · 사용 중' : ''}</span><span>` +
+      `<button class="sbtn" data-save="${n}">여기에 저장</button>` +
+      (has ? `<button class="sbtn" data-load="${n}">불러오기</button>` : '') +
+      `</span></div><div class="si">${slotSummary(d)}</div></div>`;
+  }
+  html += `<div class="foot"><button class="sbtn warn" id="btnNewTank">새 수족관</button><button class="sbtn" id="btnSaveClose">닫기</button></div>`;
+  saveBoxEl.innerHTML = html;
+  for (const b of saveBoxEl.querySelectorAll('[data-save]')) b.addEventListener('click', () => {
+    try {
+      localStorage.setItem(SAVE_KEY(+b.dataset.save), serialize());
+      localStorage.setItem(SLOT_KEY, b.dataset.save);
+    } catch {}
+    renderSaveBox();
+  });
+  for (const b of saveBoxEl.querySelectorAll('[data-load]')) b.addEventListener('click', () => {
+    try { localStorage.setItem(SLOT_KEY, b.dataset.load); } catch {}
+    location.reload();
+  });
+  let newArmed = false;
+  document.getElementById('btnNewTank').addEventListener('click', ev => {
+    if (!newArmed) { newArmed = true; ev.target.textContent = '정말 초기화 — 한 번 더'; return; }
+    try { localStorage.removeItem(SAVE_KEY(activeSlot())); } catch {}
+    location.reload();
+  });
+  document.getElementById('btnSaveClose').addEventListener('click', () => saveModalEl.classList.remove('show'));
+}
+document.getElementById('btnSave').addEventListener('click', () => {
+  renderSaveBox();
+  saveModalEl.classList.add('show');
+});
+saveModalEl.addEventListener('click', e => { if (e.target === saveModalEl) saveModalEl.classList.remove('show'); });
+
+/* 자동 저장: 15초 간격 + 페이지를 떠날 때 */
+if (!IS_SIM) {
+  setInterval(() => { try { localStorage.setItem(SAVE_KEY(activeSlot()), serialize()); } catch {} }, 15000);
+  window.addEventListener('pagehide', () => { try { localStorage.setItem(SAVE_KEY(activeSlot()), serialize()); } catch {} });
 }
 
 /* ---------- 메인 루프 ---------- */
