@@ -319,6 +319,10 @@ const HIST_MAX = 600; // 0.5초 × 600 = 5분
 const hist = { a: [], h: [], p: [], s: [], j: [], x: [], o: [], tp: [] };
 let histAcc = 0;
 
+/* ---------- 업적 상태 (v1.0) — 선언 위치 주의: initWorld가 부팅 시 참조하므로 반드시 상단 ---------- */
+const ach = {}; /* id → 달성 일자 */
+let achQuiet = true; /* 로드 직후 첫 평가는 이미 이룬 기록이므로 조용히 반영 */
+
 /* ---------- 도감 · 유전 (v0.5) ---------- */
 const HUE_BANDS = [
   [15, '붉은'], [45, '주황'], [75, '황금'], [105, '연두'], [150, '초록'], [180, '청록'],
@@ -961,8 +965,7 @@ const ACHIEVEMENTS = [
   { id: 'bloom',   name: '초록 파도',      desc: '조류 대발생을 겪었다',  check: () => (stats.bloomsSeen || 0) >= 1 },
   { id: 'recover', name: '다시 찾아온 생명', desc: '멸종 후 회복을 지켜봤다', check: () => (stats.recoveries || 0) >= 1 },
 ];
-const ach = {}; /* id → 달성 일자 */
-let achQuiet = true; /* 로드 직후 첫 평가는 이미 이룬 기록이므로 조용히 반영 */
+/* ach·achQuiet 선언은 상단(도감 섹션 앞) — initWorld 부팅 참조 때문 */
 function checkAchievements() {
   let changed = false;
   for (const a of ACHIEVEMENTS) {
